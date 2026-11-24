@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    ports:
+      - '3000:3000'
+    environment:
+      PORT: 3000
+      DATABASE_DIR: /app/data/pg
+      APP_PASSWORD: ${APP_PASSWORD:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+    volumes:
+      - learning-road-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  learning-road-data:
