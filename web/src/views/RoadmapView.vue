@@ -9,7 +9,7 @@ import {
   PRIORITIES,
 } from '@shared/types';
 import { api, ApiError } from '../lib/api';
-import { formatDate, formatMinutes } from '../lib/format';
+import { clampPercent, formatDate, formatMinutes } from '../lib/format';
 import {
   badgeToneForCourseStatus,
   badgeToneForPriority,
@@ -55,6 +55,21 @@ const createForm = reactive({
   notes: '',
 });
 
+const hasActiveFilters = computed(
+  () =>
+    categoryFilter.value !== 'all' ||
+    statusFilter.value !== 'all' ||
+    search.value.trim() !== '' ||
+    sortBy.value !== 'default',
+);
+
+const overallStats = computed(() => {
+  const total = courses.value.length;
+  const completed = courses.value.filter((c) => c.status === 'completed').length;
+  const inProgress = courses.value.filter((c) => c.status === 'in_progress').length;
+  return { total, completed, inProgress };
+});
+
 const filtered = computed(() => {
   const query = search.value.trim().toLowerCase();
   const list = courses.value.filter((course) => {
@@ -78,11 +93,22 @@ const grouped = computed(() =>
   COURSE_CATEGORIES.map((category) => {
     const list = filtered.value.filter((course) => course.category === category);
     const completed = list.filter((course) => course.status === 'completed').length;
-    return { category, list, completed };
+    const avgProgress =
+      list.length > 0
+        ? clampPercent(list.reduce((sum, item) => sum + item.progress, 0) / list.length)
+        : 0;
+    return { category, list, completed, avgProgress };
   }).filter((group) => group.list.length > 0),
 );
 
 const totalVisible = computed(() => filtered.value.length);
+
+function clearFilters() {
+  categoryFilter.value = 'all';
+  statusFilter.value = 'all';
+  search.value = '';
+  sortBy.value = 'default';
+}
 
 async function load() {
   loading.value = true;
@@ -134,9 +160,7 @@ async function submitCreate() {
     createForm.notes = '';
     createForm.durationHours = '';
     createForm.weight = '1';
-    categoryFilter.value = 'all';
-    statusFilter.value = 'all';
-    search.value = '';
+    clearFilters();
     toast.success(t('roadmap.added'));
     await load();
   } catch (err) {
@@ -187,48 +211,75 @@ onMounted(load);
   </PageHeader>
 
   <div class="card compact">
-    <div class="row wrap" style="gap: 12px">
-      <div class="tabs">
-        <button
-          type="button"
-          class="tab"
-          :class="{ active: categoryFilter === 'all' }"
-          @click="categoryFilter = 'all'"
-        >
-          {{ $t('common.all') }}
-        </button>
-        <button
-          v-for="category in COURSE_CATEGORIES"
-          :key="category"
-          type="button"
-          class="tab"
-          :class="{ active: categoryFilter === category }"
-          @click="categoryFilter = category"
-        >
-          {{ categoryLabels[category] }}
-        </button>
+    <div class="row-between wrap" style="gap: 12px">
+      <div class="row wrap" style="gap: 10px">
+        <div class="tabs">
+          <button
+            type="button"
+            class="tab"
+            :class="{ active: categoryFilter === 'all' }"
+            @click="categoryFilter = 'all'"
+          >
+            {{ $t('common.all') }}
+          </button>
+          <button
+            v-for="category in COURSE_CATEGORIES"
+            :key="category"
+            type="button"
+            class="tab"
+            :class="{ active: categoryFilter === category }"
+            @click="categoryFilter = category"
+          >
+            {{ categoryLabels[category] }}
+          </button>
+        </div>
+
+        <div class="input-wrap" style="max-width: 240px">
+          <Icon name="search" :size="15" class="input-icon-left" />
+          <input
+            v-model="search"
+            class="input input-sm input-has-left"
+            :class="{ 'input-has-right': search }"
+            type="search"
+            :placeholder="$t('roadmap.searchPlaceholder')"
+            :aria-label="$t('roadmap.searchAria')"
+          />
+          <button
+            v-if="search"
+            type="button"
+            class="input-action-right"
+            :aria-label="$t('common.clear')"
+            @click="search = ''"
+          >
+            <Icon name="close" :size="13" />
+          </button>
+        </div>
+
+        <select v-model="statusFilter" class="select input-sm" style="max-width: 175px" :aria-label="$t('roadmap.filterStatusAria')">
+          <option value="all">{{ $t('roadmap.filterStatus') }}</option>
+          <option v-for="status in COURSE_STATUSES" :key="status" :value="status">
+            {{ courseStatusLabels[status] }}
+          </option>
+        </select>
+
+        <select v-model="sortBy" class="select input-sm" style="max-width: 175px" :aria-label="$t('roadmap.sortAria')">
+          <option value="default">{{ $t('roadmap.sortDefault') }}</option>
+          <option value="progress">{{ $t('roadmap.sortProgress') }}</option>
+          <option value="duration">{{ $t('roadmap.sortDuration') }}</option>
+          <option value="title">{{ $t('roadmap.sortTitle') }}</option>
+        </select>
       </div>
-      <select v-model="statusFilter" class="select" style="max-width: 190px" :aria-label="$t('roadmap.filterStatusAria')">
-        <option value="all">{{ $t('roadmap.filterStatus') }}</option>
-        <option v-for="status in COURSE_STATUSES" :key="status" :value="status">
-          {{ courseStatusLabels[status] }}
-        </option>
-      </select>
-      <input
-        v-model="search"
-        class="input"
-        style="max-width: 260px"
-        type="search"
-        :placeholder="$t('roadmap.searchPlaceholder')"
-        :aria-label="$t('roadmap.searchAria')"
-      />
-      <select v-model="sortBy" class="select" style="max-width: 190px" :aria-label="$t('roadmap.sortAria')">
-        <option value="default">{{ $t('roadmap.sortDefault') }}</option>
-        <option value="progress">{{ $t('roadmap.sortProgress') }}</option>
-        <option value="duration">{{ $t('roadmap.sortDuration') }}</option>
-        <option value="title">{{ $t('roadmap.sortTitle') }}</option>
-      </select>
-      <span class="muted">{{ $t('roadmap.count', { count: totalVisible }) }}</span>
+
+      <div class="row wrap" style="gap: 10px">
+        <button v-if="hasActiveFilters" type="button" class="link-btn" @click="clearFilters">
+          {{ $t('roadmap.clearFilters') }}
+        </button>
+        <span class="badge badge-neutral tabular">{{ $t('roadmap.count', { count: totalVisible }) }}</span>
+      </div>
+    </div>
+
+    <div v-if="!loading && courses.length > 0" class="muted mt-8 tabular">
+      {{ $t('roadmap.overallSummary', overallStats) }}
     </div>
   </div>
 
@@ -248,35 +299,60 @@ onMounted(load);
       :text="$t('roadmap.emptyText')"
       icon="search"
     >
-      <button type="button" class="btn btn-primary btn-sm" @click="openCreate">{{ $t('roadmap.addCourse') }}</button>
+      <div class="row wrap" style="gap: 8px; justify-content: center">
+        <button v-if="hasActiveFilters" type="button" class="btn btn-sm" @click="clearFilters">
+          {{ $t('roadmap.clearFilters') }}
+        </button>
+        <button type="button" class="btn btn-primary btn-sm" @click="openCreate">{{ $t('roadmap.addCourse') }}</button>
+      </div>
     </EmptyState>
   </div>
 
-  <div v-else class="stack mt-16">
+  <div v-else class="stack mt-24">
     <section v-for="group in grouped" :key="group.category" class="stack">
-      <div class="row-between">
-        <div>
-          <h2>{{ categoryLabels[group.category] }} — {{ categoryDescriptions[group.category] }}</h2>
-          <p class="muted">
-            {{ $t('roadmap.groupMeta', { count: group.list.length, completed: group.completed }) }}
-            <span v-if="group.category === 'C'">{{ $t('roadmap.groupWeightZero') }}</span>
-          </p>
+      <div class="row-between wrap" style="gap: 12px">
+        <div class="row wrap" style="gap: 10px">
+          <span class="badge" :class="`badge-cat-${group.category}`" style="font-size: 12.5px; padding: 4px 10px">
+            {{ categoryLabels[group.category] }}
+          </span>
+          <div>
+            <h2>{{ categoryDescriptions[group.category] }}</h2>
+            <p class="muted tabular">
+              {{ $t('roadmap.groupMeta', { count: group.list.length, completed: group.completed }) }}
+              <span v-if="group.category === 'C'">{{ $t('roadmap.groupWeightZero') }}</span>
+            </p>
+          </div>
+        </div>
+        <div class="row" style="gap: 10px; min-width: 170px">
+          <div class="grow">
+            <ProgressBar
+              :value="group.avgProgress"
+              :tone="group.avgProgress === 100 ? 'success' : 'accent'"
+              size="sm"
+            />
+          </div>
+          <strong class="tabular muted">{{ group.avgProgress }}%</strong>
         </div>
       </div>
 
       <div class="grid cols-2">
-        <article v-for="course in group.list" :key="course.id" class="course-card">
+        <article
+          v-for="course in group.list"
+          :key="course.id"
+          class="course-card"
+          :class="`status-${course.status}`"
+        >
           <div class="course-card-head">
             <div class="grow">
               <div class="row wrap" style="gap: 6px; margin-bottom: 6px">
-                <span class="badge badge-outline">{{ categoryLabels[course.category] }}</span>
+                <span class="badge" :class="`badge-cat-${course.category}`">{{ categoryLabels[course.category] }}</span>
                 <span class="badge" :class="`badge-${badgeToneForCourseStatus(course.status)}`">
                   {{ courseStatusLabels[course.status] }}
                 </span>
                 <span class="badge" :class="`badge-${badgeToneForPriority(course.priority)}`">
                   {{ priorityLabels[course.priority] }}
                 </span>
-                <span v-if="course.durationHours !== null" class="badge badge-neutral">
+                <span v-if="course.durationHours !== null" class="badge badge-neutral tabular">
                   {{ $t('roadmap.durationBadge', { hours: course.durationHours }) }}
                 </span>
               </div>
@@ -284,19 +360,22 @@ onMounted(load);
                 {{ course.title }}
               </RouterLink>
             </div>
-            <strong class="nowrap">{{ course.progress }}%</strong>
+            <strong class="nowrap tabular" style="font-size: 15px">{{ course.progress }}%</strong>
           </div>
 
-          <p class="course-desc">{{ course.description }}</p>
+          <p v-if="course.description" class="course-desc">{{ course.description }}</p>
 
           <div>
-            <ProgressBar :value="course.progress" />
+            <ProgressBar
+              :value="course.progress"
+              :tone="course.progress === 100 ? 'success' : 'accent'"
+            />
             <div class="progress-meta mt-8">
-              <span>
+              <span class="tabular">
                 {{ $t('roadmap.checklist', { done: course.topicsCompleted, total: course.topicsTotal }) }}
                 <template v-if="course.topicsTotal === 0">{{ $t('roadmap.manualProgress') }}</template>
               </span>
-              <span>{{ $t('roadmap.studyRecorded', { duration: formatMinutes(course.studyMinutes) }) }}</span>
+              <span class="tabular">{{ $t('roadmap.studyRecorded', { duration: formatMinutes(course.studyMinutes) }) }}</span>
             </div>
           </div>
 
@@ -307,12 +386,22 @@ onMounted(load);
               {{ $t('roadmap.completed', { date: formatDate(course.completedAt) }) }}
             </span>
             <span v-if="!course.startedAt && !course.completedAt">{{ $t('roadmap.noStart') }}</span>
+            <a
+              v-if="course.link"
+              :href="course.link"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="cell-link"
+              style="margin-top: 0; margin-left: auto"
+            >
+              <Icon name="external" :size="12" /> {{ $t('course.courseLink') }}
+            </a>
           </div>
 
           <div class="course-footer">
             <select
               class="select input-sm"
-              style="max-width: 160px"
+              style="max-width: 165px"
               :value="course.status"
               :disabled="statusUpdating === course.id"
               :aria-label="$t('roadmap.statusAria', { title: course.title })"

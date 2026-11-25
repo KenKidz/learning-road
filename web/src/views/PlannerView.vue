@@ -17,6 +17,7 @@ import { PRIORITIES, TASK_STATUSES, TASK_TYPES } from '@shared/types';
 import { api, ApiError } from '../lib/api';
 import {
   addDays,
+  clampPercent,
   combineDateTime,
   dateInTimezone,
   formatDate,
@@ -27,7 +28,6 @@ import {
   todayInTimezone,
 } from '../lib/format';
 import {
-
   priorityLabels,
   taskStatusLabels,
   taskTypeLabels,
@@ -35,10 +35,10 @@ import {
 import { useToast } from '../composables/useToast';
 import { confirmAction } from '../composables/useConfirm';
 import PageHeader from '../components/PageHeader.vue';
+import StatCard from '../components/StatCard.vue';
 import TaskRow from '../components/TaskRow.vue';
 import EmptyState from '../components/EmptyState.vue';
 import BaseModal from '../components/BaseModal.vue';
-import ProgressBar from '../components/ProgressBar.vue';
 import Icon from '../components/Icon.vue';
 
 type Tab = 'today' | 'week' | 'history';
@@ -88,7 +88,11 @@ const showAiPlanModal = ref(false);
 const editingTask = ref<Task | null>(null);
 const editingSession = ref<StudySession | null>(null);
 const quickTitle = ref('');
+const quickCourseId = ref('');
+const quickEstimate = ref<number | null>(null);
 const quickAdding = ref(false);
+
+const quickDurationOptions = [30, 45, 60, 90];
 
 const aiStatus = ref<AiStatus | null>(null);
 const aiGenerating = ref(false);
@@ -143,6 +147,14 @@ const historySessions = computed(() => sessions.value.slice(0, 40));
 const isTodaySelected = computed(() => selectedDate.value === today.value);
 const dayEstimate = computed(() => summary.value.estimatedMinutes);
 const dayActual = computed(() => summary.value.actualMinutes);
+const dailyGoalPercent = computed(() => {
+  if (!settings.value || settings.value.dailyGoalMinutes <= 0) return 0;
+  return clampPercent((sessionTotal.value / settings.value.dailyGoalMinutes) * 100);
+});
+const weeklyGoalPercent = computed(() => {
+  if (!settings.value || settings.value.weeklyGoalMinutes <= 0) return 0;
+  return clampPercent((sessionTotal.value / settings.value.weeklyGoalMinutes) * 100);
+});
 
 function minutesOnDate(date: string): number {
   if (!settings.value) return 0;
@@ -178,7 +190,11 @@ async function loadReferences() {
     ]);
   settings.value = settingsResponse;
   today.value = todayInTimezone(settingsResponse.timezone);
-  if (!selectedDate.value) selectedDate.value = today.value;
+  const queryDate =
+    typeof route.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(route.query.date)
+      ? route.query.date
+      : '';
+  if (!selectedDate.value) selectedDate.value = queryDate || today.value;
   courses.value = coursesResponse.courses;
   projects.value = projectsResponse.projects;
   taskOptions.value = tasksResponse.tasks;
@@ -188,6 +204,16 @@ async function loadReferences() {
 const selectedAiTaskCount = computed(
   () => aiSuggestedTasks.value.filter((item) => item.selected).length,
 );
+const allAiSelected = computed(
+  () => aiSuggestedTasks.value.length > 0 && selectedAiTaskCount.value === aiSuggestedTasks.value.length,
+);
+
+function toggleAllAiTasks() {
+  const next = !allAiSelected.value;
+  for (const item of aiSuggestedTasks.value) {
+    item.selected = next;
+  }
+}
 
 function openAiPlanModal() {
   aiPlanForm.courseId =
@@ -329,6 +355,8 @@ async function quickAdd() {
       title: quickTitle.value.trim(),
       type: 'study',
       plannedDate: selectedDate.value,
+      relatedCourseId: quickCourseId.value ? Number(quickCourseId.value) : null,
+      estimatedMinutes: quickEstimate.value,
     });
     quickTitle.value = '';
     toast.success(t('planner.taskAdded'));
@@ -340,8 +368,8 @@ async function quickAdd() {
   }
 }
 
-function openTaskCreate() {
-  resetTaskForm(selectedDate.value || today.value);
+function openTaskCreate(date = selectedDate.value || today.value) {
+  resetTaskForm(date);
   showTaskModal.value = true;
 }
 
@@ -408,6 +436,17 @@ async function toggleTask(task: Task) {
   }
 }
 
+async function startTask(task: Task) {
+  try {
+    await api.updateTask(task.id, {
+      status: task.status === 'in_progress' ? 'todo' : 'in_progress',
+    });
+    await loadCurrent();
+  } catch (err) {
+    toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
+  }
+}
+
 async function removeTask(task: Task) {
   const confirmed = await confirmAction({
     title: t('planner.deleteTaskTitle'),
@@ -461,6 +500,15 @@ function resetSessionForm() {
 
 function openSessionCreate() {
   resetSessionForm();
+  showSessionModal.value = true;
+}
+
+function openSessionForTask(task: Task) {
+  resetSessionForm();
+  sessionForm.taskId = String(task.id);
+  sessionForm.courseId = task.relatedCourseId ? String(task.relatedCourseId) : '';
+  sessionForm.date = task.plannedDate || selectedDate.value || today.value;
+  sessionForm.durationMinutes = task.estimatedMinutes ? String(task.estimatedMinutes) : '60';
   showSessionModal.value = true;
 }
 
@@ -540,6 +588,9 @@ onMounted(async () => {
   try {
     await loadReferences();
     await loadCurrent();
+    if (route.query.action === 'session') {
+      openSessionCreate();
+    }
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : t('errors.plannerLoad');
   } finally {
@@ -560,7 +611,7 @@ onMounted(async () => {
       <button type="button" class="btn" @click="openSessionCreate">
         <Icon name="clock" :size="16" /> {{ $t('dashboard.addSession') }}
       </button>
-      <button type="button" class="btn btn-primary" @click="openTaskCreate">
+      <button type="button" class="btn btn-primary" @click="openTaskCreate()">
         <Icon name="plus" :size="16" /> {{ $t('planner.newTask') }}
       </button>
     </template>
@@ -595,11 +646,11 @@ onMounted(async () => {
         </div>
 
         <div v-if="tab !== 'history'" class="row wrap" style="gap: 6px">
-          <button type="button" class="btn btn-ghost btn-icon" :aria-label="$t('planner.prev')" @click="shiftDate(-1)">
+          <button type="button" class="btn btn-ghost btn-icon btn-sm" :aria-label="$t('planner.prev')" @click="shiftDate(-1)">
             <Icon name="chevron-left" :size="16" />
           </button>
           <input v-model="selectedDate" class="input input-sm" type="date" style="width: 150px" @change="loadCurrent" />
-          <button type="button" class="btn btn-ghost btn-icon" :aria-label="$t('planner.next')" @click="shiftDate(1)">
+          <button type="button" class="btn btn-ghost btn-icon btn-sm" :aria-label="$t('planner.next')" @click="shiftDate(1)">
             <Icon name="chevron-right" :size="16" />
           </button>
           <button type="button" class="btn btn-sm" :disabled="isTodaySelected" @click="goToday">
@@ -610,7 +661,7 @@ onMounted(async () => {
       <p class="card-hint mt-8">
         {{ $t('planner.timezoneGoals', { timezone: settings.timezone, goal: formatMinutes(settings.dailyGoalMinutes) }) }}
         <template v-if="tab === 'week'">
-          {{ $t('planner.weekRange', { start: formatDate(weekStart), end: formatDate(addDays(weekStart, 6)) }) }}
+          · {{ $t('planner.weekRange', { start: formatDate(weekStart), end: formatDate(addDays(weekStart, 6)) }) }}
         </template>
       </p>
     </div>
@@ -626,33 +677,33 @@ onMounted(async () => {
 
     <div v-if="tab === 'today'" class="stack mt-16">
       <div class="grid stats-grid">
-        <div class="card compact">
-          <div class="stat-label">{{ $t('planner.openTasks') }}</div>
-          <div class="stat-value">{{ summary.open }}</div>
-          <div class="stat-note">{{ $t('planner.doneInDay', { count: summary.done }) }}</div>
-        </div>
-        <div class="card compact">
-          <div class="stat-label">{{ $t('planner.estimated') }}</div>
-          <div class="stat-value">{{ formatMinutes(dayEstimate) }}</div>
-          <div class="stat-note">{{ $t('planner.actualOnTasks', { duration: formatMinutes(dayActual) }) }}</div>
-        </div>
-        <div class="card compact">
-          <div class="stat-label">{{ $t('planner.sessionsInDay') }}</div>
-          <div class="stat-value">{{ formatMinutes(sessionTotal) }}</div>
-          <div class="stat-note">{{ $t('planner.sessionsSource') }}</div>
-        </div>
-        <div class="card compact">
-          <div class="stat-label">{{ $t('planner.dailyGoal') }}</div>
-          <div class="stat-value">
-            {{ settings.dailyGoalMinutes > 0 ? Math.round((sessionTotal / settings.dailyGoalMinutes) * 100) : 0 }}%
-          </div>
-          <div class="mt-8">
-            <ProgressBar
-              :value="settings.dailyGoalMinutes > 0 ? (sessionTotal / settings.dailyGoalMinutes) * 100 : 0"
-              :tone="sessionTotal >= settings.dailyGoalMinutes ? 'success' : 'accent'"
-            />
-          </div>
-        </div>
+        <StatCard
+          :label="$t('planner.openTasks')"
+          :value="summary.open"
+          :note="$t('planner.doneInDay', { count: summary.done })"
+          icon="planner"
+          tone="accent"
+        />
+        <StatCard
+          :label="$t('planner.estimated')"
+          :value="formatMinutes(dayEstimate)"
+          :note="$t('planner.actualOnTasks', { duration: formatMinutes(dayActual) })"
+          icon="target"
+        />
+        <StatCard
+          :label="$t('planner.sessionsInDay')"
+          :value="formatMinutes(sessionTotal)"
+          :note="$t('planner.sessionsSource')"
+          icon="clock"
+          tone="info"
+        />
+        <StatCard
+          :label="$t('planner.dailyGoal')"
+          :value="`${dailyGoalPercent}%`"
+          :progress="dailyGoalPercent"
+          icon="check-circle"
+          :tone="dailyGoalPercent >= 100 ? 'success' : 'accent'"
+        />
       </div>
 
       <div v-if="overdue.length > 0" class="alert alert-warning">
@@ -672,18 +723,48 @@ onMounted(async () => {
             <h2 class="card-title">{{ relativeDayLabel(selectedDate, today) }} · {{ formatDate(selectedDate) }}</h2>
             <p class="card-hint">{{ $t('planner.quickHint') }}</p>
           </div>
-          <button type="button" class="btn btn-sm" @click="openTaskCreate">{{ $t('planner.detailedTask') }}</button>
+          <button type="button" class="btn btn-sm" @click="openTaskCreate()">{{ $t('planner.detailedTask') }}</button>
         </div>
-        <form class="row" style="gap: 8px" @submit.prevent="quickAdd">
-          <input
-            v-model="quickTitle"
-            class="input"
-            :placeholder="$t('planner.quickPlaceholder')"
-            :aria-label="$t('planner.quickAria')"
-          />
-          <button type="submit" class="btn btn-primary" :disabled="quickAdding || !quickTitle.trim()">
-            <span v-if="quickAdding" class="spinner" /> {{ $t('common.add') }}
-          </button>
+
+        <form class="stack-sm" @submit.prevent="quickAdd">
+          <div class="row" style="gap: 8px">
+            <input
+              v-model="quickTitle"
+              class="input"
+              :placeholder="$t('planner.quickPlaceholder')"
+              :aria-label="$t('planner.quickAria')"
+            />
+            <button type="submit" class="btn btn-primary" :disabled="quickAdding || !quickTitle.trim()">
+              <span v-if="quickAdding" class="spinner" /> {{ $t('common.add') }}
+            </button>
+          </div>
+          <div class="row wrap" style="gap: 8px">
+            <select
+              v-model="quickCourseId"
+              class="select input-sm"
+              style="max-width: 240px"
+              :aria-label="$t('planner.quickCourseLabel')"
+            >
+              <option value="">{{ $t('planner.quickCourseLabel') }}</option>
+              <option v-for="course in courses" :key="course.id" :value="String(course.id)">
+                [{{ course.category }}] {{ course.title }}
+              </option>
+            </select>
+            <div class="row wrap" style="gap: 5px">
+              <span class="muted">{{ $t('planner.quickMinutesLabel') }}</span>
+              <button
+                v-for="mins in quickDurationOptions"
+                :key="mins"
+                type="button"
+                class="pill-btn"
+                style="padding: 3px 9px; font-size: 11.5px"
+                :class="{ active: quickEstimate === mins }"
+                @click="quickEstimate = quickEstimate === mins ? null : mins"
+              >
+                {{ mins }}m
+              </button>
+            </div>
+          </div>
         </form>
 
         <div v-if="contentLoading" class="mt-16">
@@ -704,7 +785,11 @@ onMounted(async () => {
             :key="task.id"
             :task="task"
             :today="today"
+            show-start
+            show-log-session
             @toggle="toggleTask"
+            @start="startTask"
+            @log-session="openSessionForTask"
             @edit="openTaskEdit"
             @remove="removeTask"
           />
@@ -715,7 +800,7 @@ onMounted(async () => {
         <div class="card-head">
           <div>
             <h2 class="card-title">{{ $t('planner.sessionsTitle', { date: formatDate(selectedDate) }) }}</h2>
-            <p class="card-hint">{{ $t('planner.total', { duration: formatMinutes(sessionTotal) }) }}</p>
+            <p class="card-hint tabular">{{ $t('planner.total', { duration: formatMinutes(sessionTotal) }) }}</p>
           </div>
           <button type="button" class="btn btn-sm" @click="openSessionCreate">
             <Icon name="plus" :size="14" /> {{ $t('course.logTime') }}
@@ -729,23 +814,23 @@ onMounted(async () => {
             <div class="grow">
               <div class="row-between">
                 <div>
-                  <strong>{{ formatMinutes(session.durationMinutes) }}</strong>
-                  <span class="muted"> · {{ localTimeString(session.startedAt) }}</span>
+                  <strong class="tabular">{{ formatMinutes(session.durationMinutes) }}</strong>
+                  <span class="muted tabular"> · {{ localTimeString(session.startedAt) }}</span>
                 </div>
                 <div class="row" style="gap: 2px">
                   <button type="button" class="btn btn-ghost btn-icon btn-sm" :aria-label="$t('planner.editSession')" @click="openSessionEdit(session)">
                     <Icon name="edit" :size="14" />
                   </button>
-                  <button type="button" class="btn btn-ghost btn-icon btn-sm" :aria-label="$t('common.delete')" @click="removeSession(session)">
+                  <button type="button" class="btn btn-ghost btn-icon btn-sm btn-danger-hover" :aria-label="$t('common.delete')" @click="removeSession(session)">
                     <Icon name="trash" :size="14" />
                   </button>
                 </div>
               </div>
-              <div class="list-meta">
+              <div v-if="session.courseId || session.taskTitle" class="list-meta">
                 <RouterLink
                   v-if="session.courseId"
                   :to="`/roadmap/${session.courseId}`"
-                  class="chip"
+                  class="chip chip-link"
                 >
                   {{ session.courseTitle }}
                 </RouterLink>
@@ -760,42 +845,62 @@ onMounted(async () => {
 
     <div v-else-if="tab === 'week'" class="stack mt-16">
       <div class="grid stats-grid">
-        <div class="card compact">
-          <div class="stat-label">{{ $t('planner.weekTasks') }}</div>
-          <div class="stat-value">{{ summary.open + summary.done }}</div>
-          <div class="stat-note">{{ $t('planner.weekOpen', { count: summary.open }) }}</div>
-        </div>
-        <div class="card compact">
-          <div class="stat-label">{{ $t('planner.weekStudy') }}</div>
-          <div class="stat-value">{{ formatMinutes(sessionTotal) }}</div>
-          <div class="stat-note">{{ $t('planner.weekGoal', { duration: formatMinutes(settings.weeklyGoalMinutes) }) }}</div>
-        </div>
-        <div class="card compact">
-          <div class="stat-label">{{ $t('planner.estimated') }}</div>
-          <div class="stat-value">{{ formatMinutes(dayEstimate) }}</div>
-          <div class="stat-note">{{ $t('planner.actualOnTasks', { duration: formatMinutes(dayActual) }) }}</div>
-        </div>
-        <div class="card compact">
-          <div class="stat-label">{{ $t('planner.weeklyGoal') }}</div>
-          <div class="stat-value">
-            {{ settings.weeklyGoalMinutes > 0 ? Math.round((sessionTotal / settings.weeklyGoalMinutes) * 100) : 0 }}%
-          </div>
-          <div class="mt-8">
-            <ProgressBar
-              :value="settings.weeklyGoalMinutes > 0 ? (sessionTotal / settings.weeklyGoalMinutes) * 100 : 0"
-            />
-          </div>
-        </div>
+        <StatCard
+          :label="$t('planner.weekTasks')"
+          :value="summary.open + summary.done"
+          :note="$t('planner.weekOpen', { count: summary.open })"
+          icon="planner"
+          tone="accent"
+        />
+        <StatCard
+          :label="$t('planner.weekStudy')"
+          :value="formatMinutes(sessionTotal)"
+          :note="$t('planner.weekGoal', { duration: formatMinutes(settings.weeklyGoalMinutes) })"
+          icon="clock"
+          tone="info"
+        />
+        <StatCard
+          :label="$t('planner.estimated')"
+          :value="formatMinutes(dayEstimate)"
+          :note="$t('planner.actualOnTasks', { duration: formatMinutes(dayActual) })"
+          icon="target"
+        />
+        <StatCard
+          :label="$t('planner.weeklyGoal')"
+          :value="`${weeklyGoalPercent}%`"
+          :progress="weeklyGoalPercent"
+          icon="check-circle"
+          :tone="weeklyGoalPercent >= 100 ? 'success' : 'accent'"
+        />
       </div>
 
       <div class="grid cols-2">
-        <section v-for="day in weekDays" :key="day.date" class="card compact">
-          <div class="card-head" style="margin-bottom: 8px">
+        <section
+          v-for="day in weekDays"
+          :key="day.date"
+          class="card compact week-day-card"
+          :class="{ 'is-today': day.date === today }"
+        >
+          <div class="card-head" style="margin-bottom: 10px">
             <div>
-              <h3>{{ relativeDayLabel(day.date, today) }}</h3>
-              <p class="card-hint">{{ $t('planner.daySessions', { date: formatDate(day.date), duration: formatMinutes(day.minutes) }) }}</p>
+              <div class="row" style="gap: 6px">
+                <h3>{{ relativeDayLabel(day.date, today) }}</h3>
+                <span v-if="day.date === today" class="badge badge-info">{{ $t('common.today') }}</span>
+              </div>
+              <p class="card-hint tabular">{{ $t('planner.daySessions', { date: formatDate(day.date), duration: formatMinutes(day.minutes) }) }}</p>
             </div>
-            <span class="badge badge-neutral">{{ day.tasks.length }} task</span>
+            <div class="row" style="gap: 6px">
+              <span class="badge badge-neutral tabular">{{ $t('planner.taskCount', { count: day.tasks.length }) }}</span>
+              <button
+                type="button"
+                class="btn btn-ghost btn-icon btn-sm"
+                :title="$t('planner.addForDay')"
+                :aria-label="$t('planner.addForDay')"
+                @click="openTaskCreate(day.date)"
+              >
+                <Icon name="plus" :size="14" />
+              </button>
+            </div>
           </div>
           <div v-if="day.tasks.length === 0" class="muted">{{ $t('planner.noTasks') }}</div>
           <div v-else>
@@ -804,7 +909,11 @@ onMounted(async () => {
               :key="task.id"
               :task="task"
               :today="today"
+              show-start
+              show-log-session
               @toggle="toggleTask"
+              @start="startTask"
+              @log-session="openSessionForTask"
               @edit="openTaskEdit"
               @remove="removeTask"
             />
@@ -815,28 +924,34 @@ onMounted(async () => {
 
     <div v-else class="stack mt-16">
       <div class="grid stats-grid">
-        <div class="card compact">
-          <div class="stat-label">{{ $t('planner.historyTasks') }}</div>
-          <div class="stat-value">{{ summary.done }}</div>
-        </div>
-        <div class="card compact">
-          <div class="stat-label">{{ $t('planner.historyStudy') }}</div>
-          <div class="stat-value">{{ formatMinutes(sessionTotal) }}</div>
-        </div>
-        <div class="card compact">
-          <div class="stat-label">{{ $t('planner.historySessions') }}</div>
-          <div class="stat-value">{{ sessions.length }}</div>
-        </div>
-        <div class="card compact">
-          <div class="stat-label">{{ $t('planner.historyActual') }}</div>
-          <div class="stat-value">{{ formatMinutes(dayActual) }}</div>
-        </div>
+        <StatCard
+          :label="$t('planner.historyTasks')"
+          :value="summary.done"
+          icon="check-circle"
+          tone="success"
+        />
+        <StatCard
+          :label="$t('planner.historyStudy')"
+          :value="formatMinutes(sessionTotal)"
+          icon="clock"
+          tone="info"
+        />
+        <StatCard
+          :label="$t('planner.historySessions')"
+          :value="sessions.length"
+          icon="calendar"
+        />
+        <StatCard
+          :label="$t('planner.historyActual')"
+          :value="formatMinutes(dayActual)"
+          icon="target"
+        />
       </div>
 
       <div class="grid cols-2">
         <section class="card">
           <h2 class="card-title">{{ $t('planner.historyTaskTitle') }}</h2>
-          <div v-if="tasks.length === 0">
+          <div v-if="tasks.length === 0" class="mt-16">
             <EmptyState :title="$t('planner.noHistoryTitle')" :text="$t('planner.noHistoryText')" icon="check" />
           </div>
           <div v-else class="mt-16">
@@ -855,30 +970,35 @@ onMounted(async () => {
 
         <section class="card">
           <h2 class="card-title">{{ $t('planner.sessionHistoryTitle') }}</h2>
-          <div v-if="historySessions.length === 0">
+          <div v-if="historySessions.length === 0" class="mt-16">
             <EmptyState :title="$t('dashboard.noSessionsTitle')" :text="$t('planner.noSessionHistoryText')" icon="clock" />
           </div>
           <ul v-else class="list mt-16">
             <li v-for="session in historySessions" :key="session.id" class="list-item">
               <div class="grow">
                 <div class="row-between">
-                  <strong>{{ formatMinutes(session.durationMinutes) }}</strong>
+                  <strong class="tabular">{{ formatMinutes(session.durationMinutes) }}</strong>
                   <div class="row" style="gap: 2px">
                     <button type="button" class="btn btn-ghost btn-icon btn-sm" :aria-label="$t('jobs.edit')" @click="openSessionEdit(session)">
                       <Icon name="edit" :size="14" />
                     </button>
-                    <button type="button" class="btn btn-ghost btn-icon btn-sm" :aria-label="$t('jobs.delete')" @click="removeSession(session)">
+                    <button type="button" class="btn btn-ghost btn-icon btn-sm btn-danger-hover" :aria-label="$t('jobs.delete')" @click="removeSession(session)">
                       <Icon name="trash" :size="14" />
                     </button>
                   </div>
                 </div>
                 <div class="list-meta">
-                  <span>{{ formatDate(session.startedAt) }} · {{ localTimeString(session.startedAt) }}</span>
+                  <span class="tabular">{{ formatDate(session.startedAt) }} · {{ localTimeString(session.startedAt) }}</span>
                   <template v-if="session.courseTitle">
                     <span class="sep">·</span>
                     <span>{{ session.courseTitle }}</span>
                   </template>
+                  <template v-if="session.taskTitle">
+                    <span class="sep">·</span>
+                    <span>{{ session.taskTitle }}</span>
+                  </template>
                 </div>
+                <p v-if="session.notes" class="muted mt-8">{{ session.notes }}</p>
               </div>
             </li>
           </ul>
@@ -1104,6 +1224,9 @@ onMounted(async () => {
                 })
               }}
             </strong>
+            <button type="button" class="link-btn" @click="toggleAllAiTasks">
+              {{ allAiSelected ? $t('common.deselectAll') : $t('common.selectAll') }}
+            </button>
           </div>
           <div
             v-for="(item, idx) in aiSuggestedTasks"
@@ -1121,8 +1244,8 @@ onMounted(async () => {
               </div>
               <p v-if="item.description" class="muted">{{ item.description }}</p>
               <div class="row wrap mt-8" style="gap: 6px">
-                <span class="badge badge-outline">{{ formatDate(item.plannedDate) }}</span>
-                <span class="badge badge-neutral">{{ formatMinutes(item.estimatedMinutes) }}</span>
+                <span class="badge badge-outline tabular">{{ formatDate(item.plannedDate) }}</span>
+                <span class="badge badge-neutral tabular">{{ formatMinutes(item.estimatedMinutes) }}</span>
                 <span class="badge badge-info">{{ taskTypeLabels[item.type] }}</span>
                 <span class="badge badge-outline">{{ priorityLabels[item.priority] }}</span>
                 <span v-if="item.courseTitle" class="chip">{{ item.courseTitle }}</span>

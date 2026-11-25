@@ -28,11 +28,11 @@ onBeforeUnmount(() => {
           <h2 class="modal-title">{{ title }}</h2>
           <button
             type="button"
-            class="btn btn-ghost btn-icon"
+            class="btn btn-ghost btn-icon btn-sm"
             :aria-label="$t('common.close')"
             @click="emit('close')"
           >
-            <Icon name="close" />
+            <Icon name="close" :size="16" />
           </button>
         </div>
         <div class="modal-body">

@@ -43,8 +43,9 @@ const formError = ref('');
 const selectedId = ref<number | null>(null);
 const filterType = ref('all');
 const search = ref('');
-const editorMode = ref<'write' | 'preview'>('write');
+const editorMode = ref<'write' | 'split' | 'preview'>('write');
 const creating = ref(false);
+const editorTextarea = ref<HTMLTextAreaElement | null>(null);
 
 const form = reactive({
   title: '',
@@ -52,6 +53,22 @@ const form = reactive({
   relatedId: '',
   contentMarkdown: '',
 });
+
+const savedSnapshot = reactive({
+  title: '',
+  relatedType: 'general' as NoteRelatedType,
+  relatedId: '',
+  contentMarkdown: '',
+});
+
+const isDirty = computed(
+  () =>
+    showEditor.value &&
+    (form.title !== savedSnapshot.title ||
+      form.relatedType !== savedSnapshot.relatedType ||
+      form.relatedId !== savedSnapshot.relatedId ||
+      form.contentMarkdown !== savedSnapshot.contentMarkdown),
+);
 
 const filteredNotes = computed(() => {
   const query = search.value.trim().toLowerCase();
@@ -88,6 +105,45 @@ function relatedLabel(note: LearningNote): string {
   if (note.relatedType === 'general') return t('notes.general');
   const option = optionsFor(note.relatedType).find((item) => item.id === note.relatedId);
   return option ? `${noteRelatedTypeLabels[note.relatedType]}: ${option.label}` : noteRelatedTypeLabels[note.relatedType];
+}
+
+function noteExcerpt(markdown: string): string {
+  const clean = markdown
+    .replace(/^#+\s*/gm, '')
+    .replace(/[`*_>-]/g, '')
+    .trim()
+    .split(/\r?\n/)
+    .find((line) => line.trim().length > 0);
+  return clean ?? '';
+}
+
+function syncSnapshot() {
+  savedSnapshot.title = form.title;
+  savedSnapshot.relatedType = form.relatedType;
+  savedSnapshot.relatedId = form.relatedId;
+  savedSnapshot.contentMarkdown = form.contentMarkdown;
+}
+
+function insertSnippet(before: string, after = '', placeholder = '') {
+  const el = editorTextarea.value;
+  if (!el) {
+    form.contentMarkdown += `${before}${placeholder}${after}`;
+    return;
+  }
+  const start = el.selectionStart ?? form.contentMarkdown.length;
+  const end = el.selectionEnd ?? start;
+  const selected = form.contentMarkdown.slice(start, end) || placeholder;
+  form.contentMarkdown =
+    form.contentMarkdown.slice(0, start) +
+    before +
+    selected +
+    after +
+    form.contentMarkdown.slice(end);
+  window.requestAnimationFrame(() => {
+    el.focus();
+    const cursor = start + before.length + selected.length;
+    el.setSelectionRange(cursor, cursor);
+  });
 }
 
 async function loadReferences() {
@@ -149,8 +205,8 @@ function selectNote(note: LearningNote) {
   form.relatedType = note.relatedType;
   form.relatedId = note.relatedId ? String(note.relatedId) : '';
   form.contentMarkdown = note.contentMarkdown;
+  syncSnapshot();
   formError.value = '';
-  editorMode.value = 'write';
 }
 
 function startNew(type: NoteRelatedType = 'general', relatedId: number | null = null) {
@@ -161,11 +217,12 @@ function startNew(type: NoteRelatedType = 'general', relatedId: number | null = 
   form.relatedId = relatedId ? String(relatedId) : '';
   form.contentMarkdown = '';
   formError.value = '';
-  editorMode.value = 'write';
+  if (editorMode.value === 'preview') editorMode.value = 'write';
   if (type !== 'general' && !form.relatedId) {
     const options = optionsFor(type);
     if (options[0]) form.relatedId = String(options[0].id);
   }
+  syncSnapshot();
 }
 
 async function save() {
@@ -197,6 +254,7 @@ async function save() {
     await loadNotes();
     selectedId.value = saved.id;
     creating.value = false;
+    syncSnapshot();
     if (typeof route.query.noteId === 'string' || typeof route.query.relatedType === 'string') {
       await router.replace({ path: '/notes' });
     }
@@ -222,8 +280,16 @@ async function removeNote() {
     selectedId.value = null;
     creating.value = false;
     await loadNotes();
+    if (notes.value[0]) selectNote(notes.value[0]);
   } catch (err) {
     toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
+  }
+}
+
+function handleEditorKeydown(event: KeyboardEvent) {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+    event.preventDefault();
+    void save();
   }
 }
 
@@ -264,16 +330,29 @@ onMounted(load);
   </div>
 
   <div v-else class="notes-layout">
-    <aside class="card" style="padding: 14px">
+    <aside class="card notes-sidebar">
       <div class="stack-sm">
-        <input
-          v-model="search"
-          class="input"
-          type="search"
-          :placeholder="$t('notes.searchPlaceholder')"
-          :aria-label="$t('notes.searchAria')"
-        />
-        <select v-model="filterType" class="select" :aria-label="$t('notes.filterAria')">
+        <div class="input-wrap">
+          <Icon name="search" :size="15" class="input-icon-left" />
+          <input
+            v-model="search"
+            class="input input-sm input-has-left"
+            :class="{ 'input-has-right': search }"
+            type="search"
+            :placeholder="$t('notes.searchPlaceholder')"
+            :aria-label="$t('notes.searchAria')"
+          />
+          <button
+            v-if="search"
+            type="button"
+            class="input-action-right"
+            :aria-label="$t('common.clear')"
+            @click="search = ''"
+          >
+            <Icon name="close" :size="13" />
+          </button>
+        </div>
+        <select v-model="filterType" class="select input-sm" :aria-label="$t('notes.filterAria')">
           <option value="all">{{ $t('notes.allLinks') }}</option>
           <option v-for="type in NOTE_RELATED_TYPES" :key="type" :value="type">
             {{ noteRelatedTypeLabels[type] }}
@@ -281,7 +360,7 @@ onMounted(load);
         </select>
       </div>
 
-      <div class="divider" />
+      <div class="divider" style="margin: 12px 0" />
 
       <div v-if="filteredNotes.length === 0">
         <EmptyState
@@ -292,7 +371,7 @@ onMounted(load);
           <button type="button" class="btn btn-sm btn-primary" @click="startNew()">{{ $t('notes.newNote') }}</button>
         </EmptyState>
       </div>
-      <ul v-else>
+      <ul v-else class="note-list">
         <li
           v-for="note in filteredNotes"
           :key="note.id"
@@ -304,27 +383,34 @@ onMounted(load);
           @keydown.enter="selectNote(note)"
         >
           <span class="note-list-title">{{ note.title }}</span>
-          <span class="note-list-meta">{{ relatedLabel(note) }} · {{ formatDateTime(note.updatedAt) }}</span>
+          <span v-if="noteExcerpt(note.contentMarkdown)" class="note-list-excerpt">
+            {{ noteExcerpt(note.contentMarkdown) }}
+          </span>
+          <span class="note-list-meta tabular">{{ relatedLabel(note) }} · {{ formatDateTime(note.updatedAt) }}</span>
         </li>
       </ul>
     </aside>
 
-    <section class="card">
+    <section class="card" @keydown="handleEditorKeydown">
       <template v-if="showEditor">
-        <div class="card-head">
+        <div class="card-head wrap">
           <div>
-            <h2 class="card-title">{{ selectedId !== null ? $t('notes.editTitle') : $t('notes.newNote') }}</h2>
+            <div class="row" style="gap: 8px">
+              <h2 class="card-title">{{ selectedId !== null ? $t('notes.editTitle') : $t('notes.newNote') }}</h2>
+              <span v-if="isDirty" class="badge badge-warning">{{ $t('common.unsaved') }}</span>
+            </div>
             <p class="card-hint">{{ $t('notes.previewHint') }}</p>
           </div>
-          <div class="row" style="gap: 4px">
-            <div class="tabs">
-              <button type="button" class="tab" :class="{ active: editorMode === 'write' }" @click="editorMode = 'write'">
-                {{ $t('notes.writeTab') }}
-              </button>
-              <button type="button" class="tab" :class="{ active: editorMode === 'preview' }" @click="editorMode = 'preview'">
-                {{ $t('notes.previewTab') }}
-              </button>
-            </div>
+          <div class="tabs">
+            <button type="button" class="tab" :class="{ active: editorMode === 'write' }" @click="editorMode = 'write'">
+              {{ $t('notes.writeTab') }}
+            </button>
+            <button type="button" class="tab" :class="{ active: editorMode === 'split' }" @click="editorMode = 'split'">
+              <Icon name="columns" :size="13" /> {{ $t('notes.splitTab') }}
+            </button>
+            <button type="button" class="tab" :class="{ active: editorMode === 'preview' }" @click="editorMode = 'preview'">
+              {{ $t('notes.previewTab') }}
+            </button>
           </div>
         </div>
 
@@ -360,15 +446,67 @@ onMounted(load);
 
           <div v-if="editorMode === 'write'" class="field">
             <label class="field-label" for="note-content">{{ $t('notes.content') }}</label>
-            <textarea
-              id="note-content"
-              v-model="form.contentMarkdown"
-              class="textarea mono"
-              style="min-height: 300px"
-              :placeholder="$t('notes.contentPlaceholder')"
-            />
+            <div>
+              <div class="md-toolbar">
+                <div class="row" style="gap: 2px">
+                  <button type="button" class="md-tool-btn" @click="insertSnippet('## ', '', 'Heading')">
+                    {{ $t('notes.toolbarHeading') }}
+                  </button>
+                  <button type="button" class="md-tool-btn" @click="insertSnippet('**', '**', 'bold')">
+                    {{ $t('notes.toolbarBold') }}
+                  </button>
+                  <button type="button" class="md-tool-btn" @click="insertSnippet('\n```\n', '\n```\n', 'code')">
+                    {{ $t('notes.toolbarCode') }}
+                  </button>
+                  <button type="button" class="md-tool-btn" @click="insertSnippet('\n- ', '', 'item')">
+                    {{ $t('notes.toolbarList') }}
+                  </button>
+                </div>
+                <span class="kbd">{{ $t('notes.saveShortcut') }}</span>
+              </div>
+              <textarea
+                id="note-content"
+                ref="editorTextarea"
+                v-model="form.contentMarkdown"
+                class="textarea mono md-editor-textarea"
+                style="min-height: 330px"
+                :placeholder="$t('notes.contentPlaceholder')"
+              />
+            </div>
           </div>
-          <div v-else class="card compact" style="min-height: 300px">
+
+          <div v-else-if="editorMode === 'split'" class="notes-split">
+            <div class="field">
+              <label class="field-label" for="note-content-split">{{ $t('notes.writeTab') }}</label>
+              <div>
+                <div class="md-toolbar">
+                  <div class="row" style="gap: 2px">
+                    <button type="button" class="md-tool-btn" @click="insertSnippet('## ', '', 'Heading')">H2</button>
+                    <button type="button" class="md-tool-btn" @click="insertSnippet('**', '**', 'bold')">B</button>
+                    <button type="button" class="md-tool-btn" @click="insertSnippet('`', '`', 'code')">Code</button>
+                    <button type="button" class="md-tool-btn" @click="insertSnippet('\n- ', '', 'item')">List</button>
+                  </div>
+                  <span class="kbd">Ctrl+S</span>
+                </div>
+                <textarea
+                  id="note-content-split"
+                  ref="editorTextarea"
+                  v-model="form.contentMarkdown"
+                  class="textarea mono md-editor-textarea"
+                  style="min-height: 330px"
+                  :placeholder="$t('notes.contentPlaceholder')"
+                />
+              </div>
+            </div>
+            <div class="field">
+              <span class="field-label">{{ $t('notes.previewTab') }}</span>
+              <div class="notes-preview-pane">
+                <MarkdownView :content="form.contentMarkdown" />
+              </div>
+            </div>
+          </div>
+
+          <div v-else class="notes-preview-pane" style="min-height: 360px">
             <MarkdownView :content="form.contentMarkdown" />
           </div>
 

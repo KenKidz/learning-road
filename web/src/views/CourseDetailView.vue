@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
-import { RouterLink } from 'vue-router';
+import { RouterLink, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import type {
   CourseCategory,
@@ -36,6 +36,7 @@ import BaseModal from '../components/BaseModal.vue';
 import Icon from '../components/Icon.vue';
 
 const props = defineProps<{ id: number }>();
+const router = useRouter();
 const toast = useToast();
 const { t } = useI18n();
 
@@ -50,6 +51,9 @@ const showTopic = ref(false);
 const topicError = ref('');
 const editError = ref('');
 const manualProgress = ref('0');
+const quickContentTitle = ref('');
+const quickDodTitle = ref('');
+const quickAddingKind = ref<TopicKind | null>(null);
 
 const editingTopicId = ref<number | null>(null);
 
@@ -160,8 +164,7 @@ async function changeStatus(status: CourseStatus) {
   if (status === 'completed') {
     const confirmed = await confirmAction({
       title: t('course.confirmCompleteTitle'),
-      message:
-        t('course.confirmCompleteText'),
+      message: t('course.confirmCompleteText'),
       confirmLabel: t('course.confirmComplete'),
     });
     if (!confirmed) return;
@@ -201,12 +204,37 @@ async function toggleTopic(topic: CourseTopic) {
   }
 }
 
+async function quickAddTopic(kind: TopicKind) {
+  if (!course.value || quickAddingKind.value !== null) return;
+  const title = (kind === 'content' ? quickContentTitle.value : quickDodTitle.value).trim();
+  if (!title) return;
+  quickAddingKind.value = kind;
+  try {
+    await api.createTopic(course.value.id, {
+      title,
+      description: '',
+      kind,
+      sortOrder: kind === 'content' ? contentTopics.value.length : dodTopics.value.length,
+    });
+    if (kind === 'content') quickContentTitle.value = '';
+    else quickDodTitle.value = '';
+    toast.success(t('course.topicAdded'));
+    await load();
+  } catch (err) {
+    toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
+  } finally {
+    quickAddingKind.value = null;
+  }
+}
+
 function openTopicCreate(kind: TopicKind) {
   editingTopicId.value = null;
   topicForm.title = '';
   topicForm.description = '';
   topicForm.kind = kind;
-  topicForm.sortOrder = '0';
+  topicForm.sortOrder = String(
+    kind === 'content' ? contentTopics.value.length : dodTopics.value.length,
+  );
   topicError.value = '';
   showTopic.value = true;
 }
@@ -277,8 +305,7 @@ async function removeCourse() {
   if (!course.value) return;
   const confirmed = await confirmAction({
     title: t('course.confirmDeleteTitle'),
-    message:
-      t('course.confirmDeleteText'),
+    message: t('course.confirmDeleteText'),
     confirmLabel: t('course.confirmDelete'),
     danger: true,
   });
@@ -287,7 +314,7 @@ async function removeCourse() {
   try {
     await api.deleteCourse(course.value.id);
     toast.success(t('course.deleted'));
-    window.location.href = '/roadmap';
+    await router.push('/roadmap');
   } catch (err) {
     toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
   } finally {
@@ -336,7 +363,9 @@ watch(
     <div class="breadcrumb">
       <RouterLink to="/roadmap">{{ $t('nav.roadmap') }}</RouterLink>
       <Icon name="chevron-right" :size="12" />
-      <span>{{ categoryLabels[course.category] }}</span>
+      <RouterLink :to="`/roadmap?category=${course.category}`">{{ categoryLabels[course.category] }}</RouterLink>
+      <Icon name="chevron-right" :size="12" />
+      <span>{{ course.title }}</span>
     </div>
 
     <PageHeader :title="course.title" :subtitle="course.description">
@@ -350,6 +379,9 @@ watch(
         >
           <Icon name="external" :size="16" /> {{ $t('course.courseLink') }}
         </a>
+        <RouterLink :to="`/planner?courseId=${course.id}&action=session`" class="btn">
+          <Icon name="clock" :size="16" /> {{ $t('course.logTime') }}
+        </RouterLink>
         <button type="button" class="btn" @click="openEdit">
           <Icon name="edit" :size="16" /> {{ $t('jobs.edit') }}
         </button>
@@ -360,17 +392,17 @@ watch(
     </PageHeader>
 
     <div class="row wrap" style="gap: 6px; margin-bottom: 18px">
-      <span class="badge badge-outline">{{ categoryLabels[course.category] }}</span>
+      <span class="badge" :class="`badge-cat-${course.category}`">{{ categoryLabels[course.category] }}</span>
       <span class="badge" :class="`badge-${badgeToneForCourseStatus(course.status)}`">
         {{ courseStatusLabels[course.status] }}
       </span>
       <span class="badge" :class="`badge-${badgeToneForPriority(course.priority)}`">
-        Priority {{ priorityLabels[course.priority] }}
+        {{ $t('course.priorityBadge', { priority: priorityLabels[course.priority] }) }}
       </span>
-      <span v-if="course.durationHours !== null" class="badge badge-neutral">
+      <span v-if="course.durationHours !== null" class="badge badge-neutral tabular">
         {{ $t('roadmap.durationBadge', { hours: course.durationHours }) }}
       </span>
-      <span v-if="course.isSeeded" class="badge badge-neutral">{{ $t('course.seedBadge') }}</span>
+      <span v-if="course.isSeeded" class="badge badge-outline">{{ $t('course.seedBadge') }}</span>
     </div>
 
     <div class="grid cols-main">
@@ -383,12 +415,16 @@ watch(
                 {{ $t('course.progressHint') }}
               </p>
             </div>
-            <strong>{{ course.progress }}%</strong>
+            <strong class="tabular" style="font-size: 18px">{{ course.progress }}%</strong>
           </div>
-          <ProgressBar :value="course.progress" size="lg" />
-          <div class="row wrap mt-16" style="gap: 16px">
+          <ProgressBar
+            :value="course.progress"
+            :tone="course.progress === 100 ? 'success' : 'accent'"
+            size="lg"
+          />
+          <div class="row wrap mt-16 tabular" style="gap: 16px">
             <span class="muted">{{ $t('course.contentStat', { done: course.contentCompleted, total: course.contentTotal }) }}</span>
-            <span class="muted">Definition of Done: {{ course.dodCompleted }}/{{ course.dodTotal }}</span>
+            <span class="muted">{{ $t('course.dodStat', { done: course.dodCompleted, total: course.dodTotal }) }}</span>
             <span class="muted">{{ $t('course.studyRecorded', { duration: formatMinutes(course.studyMinutes) }) }}</span>
           </div>
 
@@ -416,16 +452,17 @@ watch(
 
           <div class="divider" />
           <h3>{{ $t('course.statusTitle') }}</h3>
-          <div class="row wrap mt-8" style="gap: 6px">
+          <div class="pill-group mt-8">
             <button
               v-for="status in COURSE_STATUSES"
               :key="status"
               type="button"
-              class="btn btn-sm"
-              :class="{ 'btn-primary': course.status === status }"
+              class="pill-btn"
+              :class="{ active: course.status === status }"
               :disabled="statusUpdating"
               @click="changeStatus(status)"
             >
+              <Icon v-if="status === 'completed'" name="check" :size="13" />
               {{ courseStatusLabels[status] }}
             </button>
           </div>
@@ -438,7 +475,9 @@ watch(
           <div class="card-head">
             <div>
               <h2 class="card-title">{{ $t('course.contentTitle') }}</h2>
-              <p class="card-hint">{{ $t('course.contentCount', { done: contentTopics.filter((t) => t.isCompleted).length, total: contentTopics.length }) }}</p>
+              <p class="card-hint tabular">
+                {{ $t('course.contentCount', { done: contentTopics.filter((t) => t.isCompleted).length, total: contentTopics.length }) }}
+              </p>
             </div>
             <button type="button" class="btn btn-sm" @click="openTopicCreate('content')">
               <Icon name="plus" :size="14" /> {{ $t('course.addItem') }}
@@ -459,32 +498,52 @@ watch(
               :class="{ 'is-done': topic.isCompleted }"
             >
               <input
+                :id="`topic-${topic.id}`"
                 type="checkbox"
                 :checked="topic.isCompleted"
                 :aria-label="$t('course.markTopicAria', { title: topic.title })"
                 @change="toggleTopic(topic)"
               />
-              <div class="check-label">
+              <label :for="`topic-${topic.id}`" class="check-label">
                 <div>{{ topic.title }}</div>
                 <div v-if="topic.description" class="muted">{{ topic.description }}</div>
-              </div>
+              </label>
               <div class="check-actions">
                 <button type="button" class="btn btn-ghost btn-icon btn-sm" @click="openTopicEdit(topic)">
                   <Icon name="edit" :size="14" />
                 </button>
-                <button type="button" class="btn btn-ghost btn-icon btn-sm" @click="removeTopic(topic)">
+                <button type="button" class="btn btn-ghost btn-icon btn-sm btn-danger-hover" @click="removeTopic(topic)">
                   <Icon name="trash" :size="14" />
                 </button>
               </div>
             </div>
           </div>
+
+          <form class="row mt-12" style="gap: 8px" @submit.prevent="quickAddTopic('content')">
+            <input
+              v-model="quickContentTitle"
+              class="input input-sm"
+              :placeholder="$t('course.quickAddPlaceholder')"
+              :disabled="quickAddingKind === 'content'"
+            />
+            <button
+              type="submit"
+              class="btn btn-sm"
+              :disabled="quickAddingKind === 'content' || !quickContentTitle.trim()"
+            >
+              <span v-if="quickAddingKind === 'content'" class="spinner" />
+              <template v-else>{{ $t('common.add') }}</template>
+            </button>
+          </form>
         </section>
 
         <section class="card">
           <div class="card-head">
             <div>
               <h2 class="card-title">{{ $t('course.dodTitle') }}</h2>
-              <p class="card-hint">{{ $t('course.contentCount', { done: dodTopics.filter((t) => t.isCompleted).length, total: dodTopics.length }) }}</p>
+              <p class="card-hint tabular">
+                {{ $t('course.contentCount', { done: dodTopics.filter((t) => t.isCompleted).length, total: dodTopics.length }) }}
+              </p>
             </div>
             <button type="button" class="btn btn-sm" @click="openTopicCreate('dod')">
               <Icon name="plus" :size="14" /> {{ $t('course.addItem') }}
@@ -501,32 +560,50 @@ watch(
               :class="{ 'is-done': topic.isCompleted }"
             >
               <input
+                :id="`topic-${topic.id}`"
                 type="checkbox"
                 :checked="topic.isCompleted"
                 :aria-label="$t('course.markDodAria', { title: topic.title })"
                 @change="toggleTopic(topic)"
               />
-              <div class="check-label">
+              <label :for="`topic-${topic.id}`" class="check-label">
                 <div>{{ topic.title }}</div>
                 <div v-if="topic.description" class="muted">{{ topic.description }}</div>
-              </div>
+              </label>
               <div class="check-actions">
                 <button type="button" class="btn btn-ghost btn-icon btn-sm" @click="openTopicEdit(topic)">
                   <Icon name="edit" :size="14" />
                 </button>
-                <button type="button" class="btn btn-ghost btn-icon btn-sm" @click="removeTopic(topic)">
+                <button type="button" class="btn btn-ghost btn-icon btn-sm btn-danger-hover" @click="removeTopic(topic)">
                   <Icon name="trash" :size="14" />
                 </button>
               </div>
             </div>
           </div>
+
+          <form class="row mt-12" style="gap: 8px" @submit.prevent="quickAddTopic('dod')">
+            <input
+              v-model="quickDodTitle"
+              class="input input-sm"
+              :placeholder="$t('course.quickAddPlaceholder')"
+              :disabled="quickAddingKind === 'dod'"
+            />
+            <button
+              type="submit"
+              class="btn btn-sm"
+              :disabled="quickAddingKind === 'dod' || !quickDodTitle.trim()"
+            >
+              <span v-if="quickAddingKind === 'dod'" class="spinner" />
+              <template v-else>{{ $t('common.add') }}</template>
+            </button>
+          </form>
         </section>
 
         <section v-if="course.objectives.length > 0" class="card">
           <h2 class="card-title">{{ $t('course.objectivesTitle') }}</h2>
           <ul class="stack-sm mt-16">
             <li v-for="(objective, index) in course.objectives" :key="index" class="row" style="align-items: flex-start">
-              <Icon name="check" :size="15" class="text-success" style="margin-top: 3px" />
+              <Icon name="check" :size="15" class="text-success" style="margin-top: 3px; flex: none" />
               <span class="text-soft">{{ objective }}</span>
             </li>
           </ul>
@@ -539,23 +616,23 @@ watch(
           <ul class="stack-sm mt-16">
             <li class="row-between">
               <span class="muted">{{ $t('course.duration') }}</span>
-              <span>{{ course.durationHours !== null ? $t('roadmap.durationBadge', { hours: course.durationHours }) : $t('common.notSet') }}</span>
+              <span class="tabular">{{ course.durationHours !== null ? $t('roadmap.durationBadge', { hours: course.durationHours }) : $t('common.notSet') }}</span>
             </li>
             <li class="row-between">
               <span class="muted">{{ $t('course.weight') }}</span>
-              <span>{{ course.weight }}</span>
+              <span class="tabular">{{ course.weight }}</span>
             </li>
             <li class="row-between">
               <span class="muted">{{ $t('course.started') }}</span>
-              <span>{{ formatDate(course.startedAt) }}</span>
+              <span class="tabular">{{ formatDate(course.startedAt) }}</span>
             </li>
             <li class="row-between">
               <span class="muted">{{ $t('course.completed') }}</span>
-              <span>{{ formatDate(course.completedAt) }}</span>
+              <span class="tabular">{{ formatDate(course.completedAt) }}</span>
             </li>
             <li class="row-between">
               <span class="muted">{{ $t('course.updated') }}</span>
-              <span>{{ formatDateTime(course.updatedAt) }}</span>
+              <span class="tabular">{{ formatDateTime(course.updatedAt) }}</span>
             </li>
           </ul>
           <div v-if="course.notes" class="divider" />
@@ -568,7 +645,7 @@ watch(
               <h2 class="card-title">{{ $t('course.sessionsTitle') }}</h2>
               <p class="card-hint">{{ $t('course.sessionsHint', { duration: formatMinutes(course.studyMinutes) }) }}</p>
             </div>
-            <RouterLink :to="`/planner?courseId=${course.id}`" class="btn btn-sm">
+            <RouterLink :to="`/planner?courseId=${course.id}&action=session`" class="btn btn-sm">
               <Icon name="plus" :size="14" /> {{ $t('course.logTime') }}
             </RouterLink>
           </div>
@@ -583,10 +660,10 @@ watch(
             <li v-for="session in course.sessions" :key="session.id" class="list-item">
               <div class="grow">
                 <div class="row-between">
-                  <strong>{{ formatMinutes(session.durationMinutes) }}</strong>
+                  <strong class="tabular">{{ formatMinutes(session.durationMinutes) }}</strong>
                   <button
                     type="button"
-                    class="btn btn-ghost btn-icon btn-sm"
+                    class="btn btn-ghost btn-icon btn-sm btn-danger-hover"
                     :aria-label="$t('common.delete')"
                     @click="removeSession(session.id)"
                   >
@@ -594,7 +671,7 @@ watch(
                   </button>
                 </div>
                 <div class="list-meta">
-                  <span>{{ formatDateTime(session.startedAt) }}</span>
+                  <span class="tabular">{{ formatDateTime(session.startedAt) }}</span>
                   <template v-if="session.taskTitle">
                     <span class="sep">·</span>
                     <span>{{ session.taskTitle }}</span>
@@ -637,7 +714,7 @@ watch(
                 >
                   {{ note.title }}
                 </RouterLink>
-                <div class="list-meta">{{ formatDateTime(note.updatedAt) }}</div>
+                <div class="list-meta tabular">{{ formatDateTime(note.updatedAt) }}</div>
               </div>
             </li>
           </ul>

@@ -24,6 +24,8 @@ const exporting = ref(false);
 const importing = ref(false);
 const importedSummary = ref<ImportResult | null>(null);
 
+const weekDayOrder = [1, 2, 3, 4, 5, 6, 0];
+
 const timezones = [
   'Asia/Ho_Chi_Minh',
   'Asia/Bangkok',
@@ -196,8 +198,7 @@ async function importFile(event: Event) {
     }
     const confirmed = await confirmAction({
       title: t('settings.importConfirmTitle'),
-      message:
-        t('settings.importConfirmText'),
+      message: t('settings.importConfirmText'),
       confirmLabel: t('settings.importConfirm'),
       danger: true,
     });
@@ -305,15 +306,19 @@ onMounted(load);
           </div>
           <div class="field span-2">
             <span class="field-label">{{ $t('settings.studyDays') }}</span>
-            <div class="row wrap" style="gap: 8px">
-              <label v-for="day in 7" :key="day - 1" class="checkbox">
-                <input
-                  type="checkbox"
-                  :checked="form.preferredStudyDays.includes(day - 1)"
-                  @change="toggleStudyDay(day - 1)"
-                />
-                {{ $t(`weekdays.d${day - 1}`) }}
-              </label>
+            <div class="pill-group" role="group" :aria-label="$t('settings.studyDays')">
+              <button
+                v-for="day in weekDayOrder"
+                :key="day"
+                type="button"
+                class="pill-btn"
+                :class="{ active: form.preferredStudyDays.includes(day) }"
+                :aria-pressed="form.preferredStudyDays.includes(day)"
+                @click="toggleStudyDay(day)"
+              >
+                <Icon v-if="form.preferredStudyDays.includes(day)" name="check" :size="13" />
+                {{ $t(`weekdays.d${day}`) }}
+              </button>
             </div>
             <span class="field-hint">{{ $t('settings.studyDaysCount', { count: form.preferredStudyDays.length }) }}</span>
           </div>
@@ -404,117 +409,111 @@ onMounted(load);
       </section>
     </form>
 
-    <section class="card">
-      <div class="card-head">
-        <div>
-          <h2 class="card-title">{{ $t('settings.dataTitle') }}</h2>
-          <p class="card-hint">
-            {{ $t('settings.dataHint') }}
-          </p>
+    <div class="grid cols-2">
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <h2 class="card-title">{{ $t('settings.dataTitle') }}</h2>
+            <p class="card-hint">
+              {{ $t('settings.dataHint') }}
+            </p>
+          </div>
         </div>
-      </div>
-      <div class="row wrap" style="gap: 10px">
-        <button type="button" class="btn" :disabled="exporting" @click="exportData">
-          <span v-if="exporting" class="spinner" />
-          <Icon v-else name="download" :size="16" />
-          {{ $t('settings.export') }}
-        </button>
-        <label class="btn" :class="{ disabled: importing }">
-          <span v-if="importing" class="spinner" />
-          <Icon v-else name="upload" :size="16" />
-          {{ $t('settings.import') }}
-          <input
-            type="file"
-            accept="application/json,.json"
-            class="visually-hidden"
-            :disabled="importing"
-            @change="importFile"
-          />
-        </label>
-      </div>
-      <p class="field-hint mt-8">
-        {{ $t('settings.dataWarning') }}
-      </p>
-      <div v-if="importedSummary" class="alert alert-info mt-16">
-        <Icon name="check" :size="18" />
-        <div class="alert-body">
-          {{
-            $t('settings.importedSummary', {
-              courses: importedSummary.imported.courses,
-              tasks: importedSummary.imported.tasks,
-              sessions: importedSummary.imported.studySessions,
-              jobs: importedSummary.imported.jobApplications,
-              notes: importedSummary.imported.learningNotes,
-            })
-          }}
+        <div class="row wrap" style="gap: 10px">
+          <button type="button" class="btn" :disabled="exporting" @click="exportData">
+            <span v-if="exporting" class="spinner" />
+            <Icon v-else name="download" :size="16" />
+            {{ $t('settings.export') }}
+          </button>
+          <label class="btn" :class="{ disabled: importing }">
+            <span v-if="importing" class="spinner" />
+            <Icon v-else name="upload" :size="16" />
+            {{ $t('settings.import') }}
+            <input
+              type="file"
+              accept="application/json,.json"
+              class="visually-hidden"
+              :disabled="importing"
+              @change="importFile"
+            />
+          </label>
         </div>
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="card-head">
-        <div>
-          <h2 class="card-title">{{ $t('settings.securityTitle') }}</h2>
-          <p class="card-hint">{{ $t('settings.securityHint') }}</p>
-        </div>
-      </div>
-      <ul class="stack-sm">
-        <li class="row-between">
-          <span class="muted">{{ $t('settings.passwordProtection') }}</span>
-          <span class="badge" :class="authStatus?.required ? 'badge-success' : 'badge-warning'">
-            {{ authStatus?.required ? $t('settings.authOn') : $t('settings.authOff') }}
-          </span>
-        </li>
-        <li class="row-between">
-          <span class="muted">{{ $t('ai.statusTitle') }}</span>
-          <span class="badge" :class="aiStatus?.enabled ? 'badge-success' : 'badge-neutral'">
+        <p class="field-hint mt-12">
+          {{ $t('settings.dataWarning') }}
+        </p>
+        <div v-if="importedSummary" class="alert alert-info mt-16">
+          <Icon name="check" :size="18" />
+          <div class="alert-body">
             {{
-              aiStatus?.enabled
-                ? $t('ai.statusConnected', { model: aiStatus.model })
-                : $t('ai.statusDisabled')
+              $t('settings.importedSummary', {
+                courses: importedSummary.imported.courses,
+                tasks: importedSummary.imported.tasks,
+                sessions: importedSummary.imported.studySessions,
+                jobs: importedSummary.imported.jobApplications,
+                notes: importedSummary.imported.learningNotes,
+              })
             }}
-          </span>
-        </li>
-        <li v-if="aiStatus" class="row-between">
-          <span class="muted">{{ $t('ai.baseUrlLabel') }}</span>
-          <span>{{ aiStatus.baseUrl }}</span>
-        </li>
-        <li class="row-between">
-          <span class="muted">{{ $t('settings.seedData') }}</span>
-          <span>{{ $t('settings.seedValue') }}</span>
-        </li>
-        <li class="row-between">
-          <span class="muted">{{ $t('settings.progressData') }}</span>
-          <span>{{ $t('settings.progressValue') }}</span>
-        </li>
-        <li class="row-between">
-          <span class="muted">{{ $t('settings.todaySetting') }}</span>
-          <span>{{ todayLabel }}</span>
-        </li>
-      </ul>
-      <p class="field-hint mt-16">
-        {{ $t('settings.securityNote') }}
-      </p>
-      <p class="field-hint mt-8">
-        {{ $t('ai.envGuide') }}
-      </p>
-    </section>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <h2 class="card-title">{{ $t('settings.securityTitle') }}</h2>
+            <p class="card-hint">{{ $t('settings.securityHint') }}</p>
+          </div>
+        </div>
+        <ul class="stack-sm">
+          <li class="row-between">
+            <span class="muted">{{ $t('settings.passwordProtection') }}</span>
+            <span class="badge" :class="authStatus?.required ? 'badge-success' : 'badge-warning'">
+              {{ authStatus?.required ? $t('settings.authOn') : $t('settings.authOff') }}
+            </span>
+          </li>
+          <li class="row-between">
+            <span class="muted">{{ $t('ai.statusTitle') }}</span>
+            <span class="badge" :class="aiStatus?.enabled ? 'badge-success' : 'badge-neutral'">
+              {{
+                aiStatus?.enabled
+                  ? $t('ai.statusConnected', { model: aiStatus.model })
+                  : $t('ai.statusDisabled')
+              }}
+            </span>
+          </li>
+          <li v-if="aiStatus" class="row-between">
+            <span class="muted">{{ $t('ai.baseUrlLabel') }}</span>
+            <span class="mono">{{ aiStatus.baseUrl }}</span>
+          </li>
+          <li class="row-between">
+            <span class="muted">{{ $t('settings.seedData') }}</span>
+            <span>{{ $t('settings.seedValue') }}</span>
+          </li>
+          <li class="row-between">
+            <span class="muted">{{ $t('settings.progressData') }}</span>
+            <span>{{ $t('settings.progressValue') }}</span>
+          </li>
+          <li class="row-between">
+            <span class="muted">{{ $t('settings.todaySetting') }}</span>
+            <span class="tabular">{{ todayLabel }}</span>
+          </li>
+        </ul>
+        <p class="field-hint mt-12">
+          {{ $t('settings.securityNote') }}
+        </p>
+        <p class="field-hint mt-8">
+          {{ $t('ai.envGuide') }}
+        </p>
+      </section>
+    </div>
 
     <section class="card">
       <h2 class="card-title">{{ $t('settings.opsTitle') }}</h2>
-      <ul class="stack-sm mt-16">
-        <li class="muted">
-          {{ $t('settings.opsSeed') }}
-        </li>
-        <li class="muted">
-          {{ $t('settings.opsSessions') }}
-        </li>
-        <li class="muted">
-          {{ $t('settings.opsWeight') }}
-        </li>
-        <li class="muted">
-          {{ $t('settings.opsOverdue') }}
-        </li>
+      <ul class="stack-sm mt-12">
+        <li class="muted">{{ $t('settings.opsSeed') }}</li>
+        <li class="muted">{{ $t('settings.opsSessions') }}</li>
+        <li class="muted">{{ $t('settings.opsWeight') }}</li>
+        <li class="muted">{{ $t('settings.opsOverdue') }}</li>
       </ul>
     </section>
   </div>

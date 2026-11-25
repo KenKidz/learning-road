@@ -10,6 +10,9 @@ const en: Messages = {
     switchToLight: 'Switch to light mode',
     logout: 'Sign out',
     openMenu: 'Open menu',
+    closeMenu: 'Close menu',
+    showPassword: 'Show password',
+    hidePassword: 'Hide password',
     language: 'Language',
     connecting: 'Connecting…',
     connectionError: 'Could not reach the server.',
@@ -67,6 +70,13 @@ const en: Messages = {
     durationHours: '{count} h',
     durationHoursMinutes: '{hours} h {minutes} min',
     noItems: 'No items.',
+    clear: 'Clear',
+    expandAll: 'Expand all',
+    collapseAll: 'Collapse all',
+    unsaved: 'Unsaved',
+    selectAll: 'Select all',
+    deselectAll: 'Deselect all',
+    copied: 'Copied.',
   },
   weekdays: {
     d0: 'Sun',
@@ -82,10 +92,14 @@ const en: Messages = {
     actual: 'Actual {duration}',
     edit: 'Edit task',
     delete: 'Delete task',
+    start: 'Mark in progress',
+    pause: 'Move back to To do',
+    logSession: 'Log study session for this task',
   },
   chart: {
     aria: 'Study minutes per day over the last 7 days',
     tooltip: '{date}: {minutes} min',
+    goalLine: 'Goal: {goal}',
   },
   labels: {
     courseStatus: {
@@ -303,10 +317,13 @@ const en: Messages = {
     added: 'Course added.',
     statusUpdated: 'Status updated: {status}',
     markedCompleted: 'Marked complete: {title}',
+    clearFilters: 'Clear filters',
+    overallSummary: '{completed}/{total} courses completed · {inProgress} in progress',
   },
   course: {
     detailTitle: 'Course',
     backToRoadmap: 'Back to Roadmap',
+    quickAddPlaceholder: 'Quick add checklist item…',
     markTopicAria: 'Complete: {title}',
     markDodAria: 'Meet criterion: {title}',
     courseLink: 'Course',
@@ -477,6 +494,9 @@ const en: Messages = {
     durationInvalid: 'Duration must be between 1 and 1440 minutes.',
     saveTask: 'Save task',
     saveSession: 'Save study session',
+    quickCourseLabel: 'Link course (optional)',
+    quickMinutesLabel: 'Est.:',
+    addForDay: 'Add task',
   },
   projects: {
     subtitle:
@@ -538,6 +558,8 @@ const en: Messages = {
     deleteProjectText: '“{name}” and all features/checklists will be deleted. Linked tasks are kept.',
     deleteFeatureTitle: 'Delete feature?',
     deleteFeatureText: '“{title}” and its checklist will be deleted.',
+    allStatuses: 'All',
+    toggleChecklist: 'Toggle checklist',
   },
   interview: {
     subtitle: 'Topics, your own questions, confidence, last review date and a knowledge checklist.',
@@ -603,6 +625,9 @@ const en: Messages = {
     deleteQuestionText: 'The question and answer will be deleted.',
     deleteKnowledgeTitle: 'Delete knowledge item?',
     nameRequired: 'Topic name and category are required.',
+    searchPlaceholder: 'Search topics or questions…',
+    allCategories: 'All categories',
+    allStatuses: 'All statuses',
   },
   jobs: {
     subtitle: 'Track applications, funnel, follow-ups and CV versions. Keep applying while you study.',
@@ -652,6 +677,7 @@ const en: Messages = {
     required: 'Company and position are required.',
     save: 'Save application',
     actions: 'Actions',
+    searchPlaceholder: 'Search company or position…',
   },
   notes: {
     subtitle:
@@ -669,7 +695,13 @@ const en: Messages = {
     createTitle: 'New note',
     previewHint: 'Markdown is rendered safely (HTML is sanitized).',
     writeTab: 'Write',
+    splitTab: 'Split',
     previewTab: 'Preview',
+    toolbarHeading: 'Heading',
+    toolbarBold: 'Bold',
+    toolbarCode: 'Code',
+    toolbarList: 'List',
+    saveShortcut: 'Ctrl+S to save',
     titleField: 'Title',
     relatedType: 'Linked to',
     relatedObject: 'Object',

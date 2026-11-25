@@ -20,6 +20,7 @@ import {
 import { useToast } from '../composables/useToast';
 import { confirmAction } from '../composables/useConfirm';
 import PageHeader from '../components/PageHeader.vue';
+import StatCard from '../components/StatCard.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import EmptyState from '../components/EmptyState.vue';
 import BaseModal from '../components/BaseModal.vue';
@@ -39,6 +40,8 @@ const editingProject = ref<Project | null>(null);
 const editingFeature = ref<ProjectFeature | null>(null);
 const featureProjectId = ref<number | null>(null);
 const newChecklist = reactive<Record<number, string>>({});
+const featureFilter = reactive<Record<number, FeatureStatus | 'all'>>({});
+const collapsedChecklists = ref<Set<number>>(new Set());
 
 const projectForm = reactive({
   name: '',
@@ -70,6 +73,30 @@ function featureProgress(feature: ProjectFeature): number {
   );
 }
 
+function filteredFeatures(project: Project): ProjectFeature[] {
+  const status = featureFilter[project.id] ?? 'all';
+  if (status === 'all') return project.features;
+  return project.features.filter((feature) => feature.status === status);
+}
+
+function isChecklistExpanded(feature: ProjectFeature): boolean {
+  return !collapsedChecklists.value.has(feature.id);
+}
+
+function toggleChecklistPanel(featureId: number) {
+  const next = new Set(collapsedChecklists.value);
+  if (next.has(featureId)) next.delete(featureId);
+  else next.add(featureId);
+  collapsedChecklists.value = next;
+}
+
+function featureStatusTone(status: FeatureStatus): string {
+  if (status === 'completed') return 'success';
+  if (status === 'in_progress') return 'info';
+  if (status === 'blocked') return 'danger';
+  return 'neutral';
+}
+
 const totalFeatures = computed(() =>
   projects.value.reduce((total, project) => total + project.features.length, 0),
 );
@@ -80,13 +107,27 @@ const completedFeatures = computed(() =>
     0,
   ),
 );
+const featureRate = computed(() =>
+  totalFeatures.value > 0 ? Math.round((completedFeatures.value / totalFeatures.value) * 100) : 0,
+);
 
-async function load() {
+async function load(initializeCollapse = false) {
   loading.value = true;
   error.value = '';
   try {
     const response = await api.projects();
     projects.value = response.projects;
+    if (initializeCollapse) {
+      const next = new Set<number>();
+      for (const project of response.projects) {
+        for (const feature of project.features) {
+          if (feature.status === 'completed') {
+            next.add(feature.id);
+          }
+        }
+      }
+      collapsedChecklists.value = next;
+    }
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : t('errors.projectsLoad');
   } finally {
@@ -288,7 +329,7 @@ async function removeFeature(feature: ProjectFeature) {
   }
 }
 
-onMounted(load);
+onMounted(() => void load(true));
 </script>
 
 <template>
@@ -297,7 +338,7 @@ onMounted(load);
     :subtitle="$t('projects.subtitle')"
   >
     <template #actions>
-      <button type="button" class="btn" :disabled="loading" @click="load">
+      <button type="button" class="btn" :disabled="loading" @click="load()">
         <Icon name="refresh" :size="16" /> {{ $t('common.refresh') }}
       </button>
       <button type="button" class="btn btn-primary" @click="openProjectCreate">
@@ -313,7 +354,7 @@ onMounted(load);
 
   <div v-else-if="error" class="card">
     <EmptyState :title="$t('errors.projectsLoad')" :text="error" icon="alert">
-      <button type="button" class="btn btn-primary" @click="load">{{ $t('common.retry') }}</button>
+      <button type="button" class="btn btn-primary" @click="load(true)">{{ $t('common.retry') }}</button>
     </EmptyState>
   </div>
 
@@ -329,28 +370,31 @@ onMounted(load);
 
   <div v-else class="stack">
     <div class="grid stats-grid">
-      <div class="card compact">
-        <div class="stat-label">{{ $t('planner.taskProject') }}</div>
-        <div class="stat-value">{{ projects.length }}</div>
-      </div>
-      <div class="card compact">
-        <div class="stat-label">{{ $t('projects.featureCount') }}</div>
-        <div class="stat-value">{{ completedFeatures }}/{{ totalFeatures }}</div>
-      </div>
-      <div class="card compact">
-        <div class="stat-label">{{ $t('projects.completedFeatures') }}</div>
-        <div class="stat-value">{{ completedFeatures }}</div>
-      </div>
-      <div class="card compact">
-        <div class="stat-label">{{ $t('projects.featureRate') }}</div>
-        <div class="stat-value">{{ totalFeatures > 0 ? Math.round((completedFeatures / totalFeatures) * 100) : 0 }}%</div>
-      </div>
+      <StatCard :label="$t('planner.taskProject')" :value="projects.length" icon="projects" />
+      <StatCard
+        :label="$t('projects.featureCount')"
+        :value="`${completedFeatures}/${totalFeatures}`"
+        icon="target"
+        tone="accent"
+      />
+      <StatCard
+        :label="$t('projects.completedFeatures')"
+        :value="completedFeatures"
+        icon="check-circle"
+        tone="success"
+      />
+      <StatCard
+        :label="$t('projects.featureRate')"
+        :value="`${featureRate}%`"
+        :progress="featureRate"
+        :tone="featureRate === 100 ? 'success' : 'accent'"
+      />
     </div>
 
     <section v-for="project in projects" :key="project.id" class="card">
       <div class="card-head">
         <div class="grow">
-          <div class="row wrap" style="gap: 6px; margin-bottom: 4px">
+          <div class="row wrap" style="gap: 8px; margin-bottom: 4px">
             <h2>{{ project.name }}</h2>
             <span class="badge badge-neutral">{{ projectStatusLabels[project.status] }}</span>
             <span v-if="project.isSeeded" class="badge badge-outline">{{ $t('common.seed') }}</span>
@@ -363,10 +407,10 @@ onMounted(load);
           </div>
         </div>
         <div class="row" style="gap: 2px">
-          <button type="button" class="btn btn-ghost btn-icon" :title="$t('projects.editProject')" @click="openProjectEdit(project)">
+          <button type="button" class="btn btn-ghost btn-icon btn-sm" :title="$t('projects.editProject')" @click="openProjectEdit(project)">
             <Icon name="edit" :size="15" />
           </button>
-          <button type="button" class="btn btn-ghost btn-icon" :title="$t('projects.deleteProject')" @click="removeProject(project)">
+          <button type="button" class="btn btn-ghost btn-icon btn-sm btn-danger-hover" :title="$t('projects.deleteProject')" @click="removeProject(project)">
             <Icon name="trash" :size="15" />
           </button>
         </div>
@@ -374,14 +418,40 @@ onMounted(load);
 
       <div class="progress-meta">
         <span>{{ $t('projects.projectProgress', { done: project.features.filter((f) => f.status === 'completed').length, total: project.features.length }) }}</span>
-        <strong>{{ projectProgress(project) }}%</strong>
+        <strong class="tabular">{{ projectProgress(project) }}%</strong>
       </div>
-      <ProgressBar :value="projectProgress(project)" size="lg" />
+      <ProgressBar
+        :value="projectProgress(project)"
+        :tone="projectProgress(project) === 100 ? 'success' : 'accent'"
+        size="lg"
+      />
 
       <div class="divider" />
 
-      <div class="row-between" style="margin-bottom: 10px">
-        <h3>{{ $t('projects.features') }}</h3>
+      <div class="row-between wrap" style="margin-bottom: 12px; gap: 10px">
+        <div class="row wrap" style="gap: 10px">
+          <h3>{{ $t('projects.features') }}</h3>
+          <div v-if="project.features.length > 0" class="tabs">
+            <button
+              type="button"
+              class="tab"
+              :class="{ active: (featureFilter[project.id] ?? 'all') === 'all' }"
+              @click="featureFilter[project.id] = 'all'"
+            >
+              {{ $t('projects.allStatuses') }} ({{ project.features.length }})
+            </button>
+            <button
+              v-for="status in FEATURE_STATUSES"
+              :key="status"
+              type="button"
+              class="tab"
+              :class="{ active: featureFilter[project.id] === status }"
+              @click="featureFilter[project.id] = status"
+            >
+              {{ featureStatusLabels[status] }}
+            </button>
+          </div>
+        </div>
         <button type="button" class="btn btn-sm" @click="openFeatureCreate(project.id)">
           <Icon name="plus" :size="14" /> {{ $t('projects.addFeature') }}
         </button>
@@ -390,22 +460,32 @@ onMounted(load);
       <div v-if="project.features.length === 0">
         <EmptyState :title="$t('projects.noFeaturesTitle')" :text="$t('projects.noFeaturesText')" icon="projects" />
       </div>
+      <div v-else-if="filteredFeatures(project).length === 0">
+        <EmptyState :title="$t('common.noItems')" icon="search">
+          <button type="button" class="btn btn-sm" @click="featureFilter[project.id] = 'all'">
+            {{ $t('common.clear') }}
+          </button>
+        </EmptyState>
+      </div>
       <div v-else>
-        <article v-for="feature in project.features" :key="feature.id" class="feature-card">
+        <article v-for="feature in filteredFeatures(project)" :key="feature.id" class="feature-card">
           <div class="row-between wrap" style="gap: 10px">
             <div class="grow">
               <div class="row wrap" style="gap: 6px">
                 <strong>{{ feature.title }}</strong>
+                <span class="badge" :class="`badge-${featureStatusTone(feature.status)}`">
+                  {{ featureStatusLabels[feature.status] }}
+                </span>
                 <span class="badge" :class="`badge-${badgeToneForPriority(feature.priority)}`">
                   {{ priorityLabels[feature.priority] }}
                 </span>
-                <span v-if="feature.targetDate" class="badge badge-neutral">
+                <span v-if="feature.targetDate" class="badge badge-neutral tabular">
                   {{ formatDate(feature.targetDate) }}
                 </span>
               </div>
               <p v-if="feature.description" class="card-hint">{{ feature.description }}</p>
             </div>
-            <div class="row" style="gap: 6px">
+            <div class="row" style="gap: 4px">
               <select
                 class="select input-sm"
                 style="max-width: 150px"
@@ -420,19 +500,37 @@ onMounted(load);
               <button type="button" class="btn btn-ghost btn-icon btn-sm" :title="$t('projects.editFeature')" @click="openFeatureEdit(feature)">
                 <Icon name="edit" :size="14" />
               </button>
-              <button type="button" class="btn btn-ghost btn-icon btn-sm" :title="$t('projects.deleteFeature')" @click="removeFeature(feature)">
+              <button type="button" class="btn btn-ghost btn-icon btn-sm btn-danger-hover" :title="$t('projects.deleteFeature')" @click="removeFeature(feature)">
                 <Icon name="trash" :size="14" />
               </button>
             </div>
           </div>
 
-          <div class="progress-meta mt-8">
-            <span>Checklist {{ feature.checklist.filter((item) => item.done).length }}/{{ feature.checklist.length }}</span>
-            <span>{{ featureProgress(feature) }}%</span>
+          <div class="row-between mt-8" style="gap: 10px">
+            <button
+              type="button"
+              class="link-btn"
+              style="color: var(--muted)"
+              :aria-expanded="isChecklistExpanded(feature)"
+              :aria-label="$t('projects.toggleChecklist')"
+              @click="toggleChecklistPanel(feature.id)"
+            >
+              <Icon :name="isChecklistExpanded(feature) ? 'chevron-down' : 'chevron-right'" :size="13" />
+              <span class="tabular">
+                {{ $t('projects.checklist', { done: feature.checklist.filter((item) => item.done).length, total: feature.checklist.length }) }}
+              </span>
+            </button>
+            <span class="muted tabular">{{ featureProgress(feature) }}%</span>
           </div>
-          <ProgressBar :value="featureProgress(feature)" />
+          <div class="mt-8">
+            <ProgressBar
+              :value="featureProgress(feature)"
+              :tone="featureProgress(feature) === 100 ? 'success' : 'accent'"
+              size="sm"
+            />
+          </div>
 
-          <div class="feature-checklist">
+          <div v-if="isChecklistExpanded(feature)" class="feature-checklist">
             <div
               v-for="(item, index) in feature.checklist"
               :key="`${feature.id}-${index}`"
@@ -440,14 +538,15 @@ onMounted(load);
               :class="{ 'is-done': item.done }"
             >
               <input
+                :id="`feat-${feature.id}-${index}`"
                 type="checkbox"
                 :checked="item.done"
                 :aria-label="$t('projects.checklistAria', { title: item.label })"
                 @change="toggleChecklist(feature, index)"
               />
-              <span class="check-label">{{ item.label }}</span>
+              <label :for="`feat-${feature.id}-${index}`" class="check-label">{{ item.label }}</label>
               <div class="check-actions">
-                <button type="button" class="btn btn-ghost btn-icon btn-sm" :aria-label="$t('common.delete')" @click="removeChecklistItem(feature, index)">
+                <button type="button" class="btn btn-ghost btn-icon btn-sm btn-danger-hover" :aria-label="$t('common.delete')" @click="removeChecklistItem(feature, index)">
                   <Icon name="trash" :size="13" />
                 </button>
               </div>

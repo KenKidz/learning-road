@@ -8,6 +8,9 @@ const vi = {
     switchToLight: 'Chuyển sang chế độ sáng',
     logout: 'Đăng xuất',
     openMenu: 'Mở menu',
+    closeMenu: 'Đóng menu',
+    showPassword: 'Hiện mật khẩu',
+    hidePassword: 'Ẩn mật khẩu',
     language: 'Ngôn ngữ',
     connecting: 'Đang kết nối…',
     connectionError: 'Không kết nối được tới server.',
@@ -65,6 +68,13 @@ const vi = {
     durationHours: '{count} giờ',
     durationHoursMinutes: '{hours} giờ {minutes} phút',
     noItems: 'Không có mục nào.',
+    clear: 'Xóa lọc',
+    expandAll: 'Mở tất cả',
+    collapseAll: 'Thu gọn tất cả',
+    unsaved: 'Chưa lưu',
+    selectAll: 'Chọn tất cả',
+    deselectAll: 'Bỏ chọn tất cả',
+    copied: 'Đã sao chép.',
   },
   weekdays: {
     d0: 'CN',
@@ -80,10 +90,14 @@ const vi = {
     actual: 'Thực tế {duration}',
     edit: 'Sửa task',
     delete: 'Xóa task',
+    start: 'Đánh dấu đang làm',
+    pause: 'Chuyển về cần làm',
+    logSession: 'Ghi thời gian học cho task này',
   },
   chart: {
     aria: 'Số phút học theo ngày trong 7 ngày gần nhất',
     tooltip: '{date}: {minutes} phút',
+    goalLine: 'Mục tiêu: {goal}',
   },
   labels: {
     courseStatus: {
@@ -300,10 +314,13 @@ const vi = {
     added: 'Đã thêm khóa học.',
     statusUpdated: 'Đã cập nhật trạng thái: {status}',
     markedCompleted: 'Đã đánh dấu hoàn thành: {title}',
+    clearFilters: 'Xóa bộ lọc',
+    overallSummary: '{completed}/{total} khóa học hoàn thành · {inProgress} đang học',
   },
   course: {
     detailTitle: 'Khóa học',
     backToRoadmap: 'Về Roadmap',
+    quickAddPlaceholder: 'Thêm nhanh mục checklist…',
     markTopicAria: 'Hoàn thành: {title}',
     markDodAria: 'Đạt tiêu chí: {title}',
     courseLink: 'Khóa học',
@@ -476,6 +493,9 @@ const vi = {
     durationInvalid: 'Thời lượng phải từ 1 đến 1440 phút.',
     saveTask: 'Lưu task',
     saveSession: 'Lưu study session',
+    quickCourseLabel: 'Gắn khóa học (tùy chọn)',
+    quickMinutesLabel: 'Dự kiến:',
+    addForDay: 'Thêm task',
   },
   projects: {
     subtitle:
@@ -538,6 +558,8 @@ const vi = {
       '“{name}” và toàn bộ feature/checklist sẽ bị xóa. Task liên kết vẫn được giữ.',
     deleteFeatureTitle: 'Xóa feature?',
     deleteFeatureText: '“{title}” và checklist của feature sẽ bị xóa.',
+    allStatuses: 'Tất cả',
+    toggleChecklist: 'Ẩn/hiện checklist',
   },
   interview: {
     subtitle: 'Chủ đề, câu hỏi tự soạn, mức tự tin, ngày ôn gần nhất và checklist kiến thức.',
@@ -604,6 +626,9 @@ const vi = {
     deleteQuestionText: 'Câu hỏi và câu trả lời sẽ bị xóa.',
     deleteKnowledgeTitle: 'Xóa mục kiến thức?',
     nameRequired: 'Tên chủ đề và category không được để trống.',
+    searchPlaceholder: 'Tìm chủ đề hoặc câu hỏi…',
+    allCategories: 'Tất cả danh mục',
+    allStatuses: 'Mọi trạng thái',
   },
   jobs: {
     subtitle:
@@ -654,6 +679,7 @@ const vi = {
     required: 'Company và position không được để trống.',
     save: 'Lưu hồ sơ',
     actions: 'Hành động',
+    searchPlaceholder: 'Tìm công ty hoặc vị trí…',
   },
   notes: {
     subtitle:
@@ -671,7 +697,13 @@ const vi = {
     createTitle: 'Ghi chú mới',
     previewHint: 'Markdown được render an toàn (HTML bị lọc).',
     writeTab: 'Viết',
+    splitTab: 'Chia đôi',
     previewTab: 'Xem trước',
+    toolbarHeading: 'Tiêu đề',
+    toolbarBold: 'In đậm',
+    toolbarCode: 'Code',
+    toolbarList: 'Danh sách',
+    saveShortcut: 'Ctrl+S để lưu',
     titleField: 'Tiêu đề',
     relatedType: 'Liên kết tới',
     relatedObject: 'Đối tượng',

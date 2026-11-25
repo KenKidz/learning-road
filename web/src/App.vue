@@ -8,13 +8,16 @@ import LocaleSwitcher from './components/LocaleSwitcher.vue';
 import Icon from './components/Icon.vue';
 import { api, ApiError } from './lib/api';
 import { useToast } from './composables/useToast';
+import { useTheme } from './composables/useTheme';
 
 type AuthState = 'loading' | 'login' | 'ready';
 
 const { t } = useI18n();
+const { theme, toggle } = useTheme();
 const authState = ref<AuthState>('loading');
 const authRequired = ref(false);
 const password = ref('');
+const showPassword = ref(false);
 const loginError = ref('');
 const submitting = ref(false);
 const toast = useToast();
@@ -77,43 +80,84 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-if="authState === 'loading'" class="login-screen">
-    <div class="row">
-      <span class="spinner" />
-      <span class="muted">{{ t('app.connecting') }}</span>
+    <div class="login-loading-card">
+      <div class="brand-mark" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19L10 5M14 5l6 14M12 17v2M12 11v2M12 5v2" />
+        </svg>
+      </div>
+      <div class="row" style="gap: 8px">
+        <span class="spinner" />
+        <span class="muted">{{ t('app.connecting') }}</span>
+      </div>
     </div>
   </div>
 
   <div v-else-if="authState === 'login'" class="login-screen">
     <form class="login-card" @submit.prevent="submitLogin">
-      <div class="login-brand">
-        <div class="brand-mark">LR</div>
-        <div>
-          <div class="brand-name">Learning Road</div>
-          <div class="brand-sub">{{ t('app.brandTagline') }}</div>
+      <div class="row-between">
+        <div class="login-brand">
+          <div class="brand-mark" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 19L10 5M14 5l6 14M12 17v2M12 11v2M12 5v2" />
+            </svg>
+          </div>
+          <div>
+            <div class="brand-name">Learning Road</div>
+            <div class="brand-sub">{{ t('app.brandTagline') }}</div>
+          </div>
+        </div>
+        <div class="row" style="gap: 6px">
+          <LocaleSwitcher compact />
+          <button
+            type="button"
+            class="btn btn-ghost btn-icon btn-sm"
+            :aria-label="theme === 'dark' ? t('app.switchToLight') : t('app.switchToDark')"
+            @click="toggle"
+          >
+            <Icon :name="theme === 'dark' ? 'sun' : 'moon'" :size="15" />
+          </button>
         </div>
       </div>
-      <LocaleSwitcher />
+
       <p class="muted">
         {{ t('app.loginIntro') }}
       </p>
+
       <div class="field">
         <label class="field-label" for="login-password">{{ t('app.password') }}</label>
-        <input
-          id="login-password"
-          v-model="password"
-          class="input"
-          type="password"
-          autocomplete="current-password"
-          autofocus
-        />
+        <div class="input-wrap">
+          <input
+            id="login-password"
+            v-model="password"
+            class="input input-has-right"
+            :type="showPassword ? 'text' : 'password'"
+            autocomplete="current-password"
+            autofocus
+          />
+          <button
+            type="button"
+            class="input-action-right"
+            :aria-label="showPassword ? t('app.hidePassword') : t('app.showPassword')"
+            @click="showPassword = !showPassword"
+          >
+            <Icon :name="showPassword ? 'eye-off' : 'eye'" :size="16" />
+          </button>
+        </div>
       </div>
+
       <p v-if="loginError" class="form-error">{{ loginError }}</p>
-      <button type="submit" class="btn btn-primary btn-block" :disabled="submitting">
-        <span v-if="submitting" class="spinner" />
-        <Icon v-else name="lock" :size="16" />
-        {{ t('app.login') }}
-      </button>
-      <button type="button" class="btn btn-ghost" @click="checkAuth">{{ t('app.retryConnection') }}</button>
+
+      <div class="stack-sm">
+        <button type="submit" class="btn btn-primary btn-block" :disabled="submitting">
+          <span v-if="submitting" class="spinner" />
+          <Icon v-else name="lock" :size="16" />
+          {{ t('app.login') }}
+        </button>
+        <button type="button" class="btn btn-ghost btn-sm btn-block" @click="checkAuth">
+          {{ t('app.retryConnection') }}
+        </button>
+      </div>
     </form>
   </div>
 

@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { RouterLink } from 'vue-router';
+import { RouterLink, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import type { AiStatus, DashboardData, JobStatus, Task } from '@shared/types';
 import { api, ApiError, streamAiWeeklyCoaching } from '../lib/api';
-import { formatDate, formatMinutes } from '../lib/format';
+import { clampPercent, formatDate, formatMinutes } from '../lib/format';
 import {
   badgeToneForJobStatus,
   jobStatusLabels,
   taskStatusLabels,
 } from '../lib/labels';
 import { useToast } from '../composables/useToast';
+import { confirmAction } from '../composables/useConfirm';
 import PageHeader from '../components/PageHeader.vue';
 import StatCard from '../components/StatCard.vue';
 import ProgressBar from '../components/ProgressBar.vue';
@@ -20,6 +21,7 @@ import EmptyState from '../components/EmptyState.vue';
 import MarkdownView from '../components/MarkdownView.vue';
 import Icon from '../components/Icon.vue';
 
+const router = useRouter();
 const data = ref<DashboardData | null>(null);
 const aiStatus = ref<AiStatus | null>(null);
 const loading = ref(true);
@@ -44,6 +46,24 @@ const showRoadmapSetup = computed(
 const originalSchedulePassed = computed(
   () => data.value !== null && data.value.today > '2026-11-15',
 );
+const todayGoalPercent = computed(() => {
+  if (!data.value || data.value.settings.dailyGoalMinutes <= 0) return 0;
+  return clampPercent(
+    (data.value.study.todayMinutes / data.value.settings.dailyGoalMinutes) * 100,
+  );
+});
+const weekGoalPercent = computed(() => {
+  if (!data.value || data.value.settings.weeklyGoalMinutes <= 0) return 0;
+  return clampPercent(
+    (data.value.study.weekMinutes / data.value.settings.weeklyGoalMinutes) * 100,
+  );
+});
+const interviewMasteredPercent = computed(() => {
+  if (!data.value || data.value.interview.topicsTotal === 0) return 0;
+  return clampPercent(
+    (data.value.interview.mastered / data.value.interview.topicsTotal) * 100,
+  );
+});
 
 async function load() {
   loading.value = true;
@@ -113,6 +133,16 @@ async function saveCoachingToNotes() {
   }
 }
 
+async function copyCoaching() {
+  if (!coachMarkdown.value.trim()) return;
+  try {
+    await navigator.clipboard.writeText(coachMarkdown.value.trim());
+    toast.success(t('common.copied'));
+  } catch {
+    // Ignore clipboard failure in restricted contexts
+  }
+}
+
 onBeforeUnmount(() => {
   coachAbortController?.abort();
 });
@@ -130,6 +160,46 @@ async function toggleTask(task: Task) {
   }
 }
 
+async function startTask(task: Task) {
+  if (updatingTask.value !== null) return;
+  updatingTask.value = task.id;
+  try {
+    await api.updateTask(task.id, {
+      status: task.status === 'in_progress' ? 'todo' : 'in_progress',
+    });
+    await load();
+  } catch (err) {
+    toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
+  } finally {
+    updatingTask.value = null;
+  }
+}
+
+async function removeTask(task: Task) {
+  const confirmed = await confirmAction({
+    title: t('planner.deleteTaskTitle'),
+    message: t('planner.deleteTaskText', { title: task.title }),
+    confirmLabel: t('jobs.delete'),
+    danger: true,
+  });
+  if (!confirmed) return;
+  try {
+    await api.deleteTask(task.id);
+    toast.success(t('planner.taskDeleted'));
+    await load();
+  } catch (err) {
+    toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
+  }
+}
+
+function editInPlanner(task: Task) {
+  const date = task.plannedDate ?? data.value?.today;
+  void router.push({
+    path: '/planner',
+    query: date ? { date } : undefined,
+  });
+}
+
 onMounted(load);
 </script>
 
@@ -142,7 +212,7 @@ onMounted(load);
       <button type="button" class="btn" :disabled="loading" @click="load">
         <Icon name="refresh" :size="16" /> {{ $t('common.refresh') }}
       </button>
-      <RouterLink to="/planner" class="btn btn-primary">
+      <RouterLink to="/planner?action=session" class="btn btn-primary">
         <Icon name="plus" :size="16" /> {{ $t('dashboard.addSession') }}
       </RouterLink>
     </template>
@@ -182,21 +252,34 @@ onMounted(load);
         :label="$t('dashboard.roadmapProgress')"
         :value="`${data.roadmap.progress}%`"
         :note="$t('dashboard.roadmapProgressNote')"
+        :progress="data.roadmap.progress"
+        icon="target"
+        tone="accent"
+        to="/roadmap"
       />
       <StatCard
         :label="$t('dashboard.coursesCompleted')"
         :value="`${data.roadmap.byStatus.completed}/${data.roadmap.totalCourses}`"
         :note="$t('dashboard.coursesNote', { inProgress: data.roadmap.byStatus.in_progress, paused: data.roadmap.byStatus.paused })"
+        icon="roadmap"
+        tone="success"
+        to="/roadmap"
       />
       <StatCard
         :label="$t('dashboard.studyTotal')"
         :value="formatMinutes(data.study.totalMinutes)"
         :note="$t('dashboard.studyWeekNote', { duration: formatMinutes(data.study.weekMinutes) })"
+        icon="clock"
+        tone="info"
+        to="/planner"
       />
       <StatCard
         :label="$t('dashboard.openTasks')"
         :value="openTaskCount"
         :note="$t('dashboard.taskNote', { today: todayTaskCount, overdue: data.tasks.overdue.length })"
+        icon="planner"
+        :tone="data.tasks.overdue.length > 0 ? 'warning' : 'default'"
+        to="/planner"
       />
     </div>
 
@@ -211,36 +294,51 @@ onMounted(load);
         <RouterLink to="/roadmap" class="btn btn-sm">{{ $t('dashboard.openRoadmap') }}</RouterLink>
       </div>
       <div class="grid cols-3">
-        <div v-for="group in data.roadmap.groups" :key="group.category" class="card compact">
-          <div class="row-between">
-            <div>
-              <RouterLink :to="`/roadmap?category=${group.category}`" class="card-title">
-                {{ $t(`labels.category.${group.category}`) }} —
-                {{ $t(`labels.categoryDescription.${group.category}`) }}
-              </RouterLink>
+        <RouterLink
+          v-for="group in data.roadmap.groups"
+          :key="group.category"
+          :to="`/roadmap?category=${group.category}`"
+          class="card compact card-interactive"
+        >
+          <div class="row-between" style="align-items: flex-start">
+            <div class="stack-sm" style="gap: 4px">
+              <div class="row wrap" style="gap: 6px">
+                <span class="badge" :class="`badge-cat-${group.category}`">
+                  {{ $t(`labels.category.${group.category}`) }}
+                </span>
+                <span class="card-title" style="font-size: 13.5px">
+                  {{ $t(`labels.categoryDescription.${group.category}`) }}
+                </span>
+              </div>
               <p class="card-hint">
                 {{ $t('dashboard.groupMeta', { completed: group.coursesCompleted, total: group.coursesTotal, inProgress: group.coursesInProgress }) }}
               </p>
             </div>
-            <strong>{{ group.progress }}%</strong>
+            <strong class="tabular" style="font-size: 15px">{{ group.progress }}%</strong>
           </div>
-          <div class="mt-16">
-            <ProgressBar :value="group.progress" size="lg" />
+          <div class="mt-12">
+            <ProgressBar
+              :value="group.progress"
+              :tone="group.progress === 100 ? 'success' : 'accent'"
+              size="lg"
+            />
           </div>
-          <p class="card-hint mt-8">
+          <p class="card-hint mt-8 tabular">
             {{ $t('dashboard.groupStudy', { duration: formatMinutes(group.studyMinutes) }) }}
           </p>
-        </div>
+        </RouterLink>
       </div>
     </section>
 
-    <section class="card">
+    <section class="card ai-coach-card">
       <div class="card-head">
         <div>
           <div class="row wrap" style="gap: 8px">
-            <h2 class="card-title">{{ $t('ai.coachTitle') }}</h2>
+            <h2 class="card-title">
+              <Icon name="sparkles" :size="16" class="text-info" />
+              {{ $t('ai.coachTitle') }}
+            </h2>
             <span class="badge" :class="aiStatus?.enabled ? 'badge-info' : 'badge-neutral'">
-              <Icon name="sparkles" :size="13" />
               {{
                 aiStatus?.enabled
                   ? $t('ai.statusConnected', { model: aiStatus.model })
@@ -250,23 +348,15 @@ onMounted(load);
           </div>
           <p class="card-hint">{{ $t('ai.coachHint') }}</p>
         </div>
-        <div class="row wrap" style="gap: 8px">
+        <div class="row wrap" style="gap: 6px">
           <button
-            v-if="coachStreaming"
+            v-if="coachMarkdown && !coachStreaming"
             type="button"
             class="btn btn-sm"
-            @click="stopAiCoaching"
+            :aria-label="$t('common.save')"
+            @click="copyCoaching"
           >
-            <Icon name="close" :size="14" /> {{ $t('ai.coachStop') }}
-          </button>
-          <button
-            v-else
-            type="button"
-            class="btn btn-primary btn-sm"
-            :disabled="aiStatus !== null && !aiStatus.enabled"
-            @click="runAiCoaching"
-          >
-            <Icon name="sparkles" :size="14" /> {{ $t('ai.coachAnalyze') }}
+            <Icon name="copy" :size="14" />
           </button>
           <button
             v-if="coachMarkdown && !coachStreaming"
@@ -279,19 +369,43 @@ onMounted(load);
             <Icon v-else name="notes" :size="14" />
             {{ $t('ai.coachSaveNote') }}
           </button>
+          <button
+            v-if="coachMarkdown && !coachStreaming"
+            type="button"
+            class="btn btn-ghost btn-icon btn-sm"
+            :aria-label="$t('common.close')"
+            @click="coachMarkdown = ''"
+          >
+            <Icon name="close" :size="14" />
+          </button>
         </div>
       </div>
 
-      <div class="row wrap" style="gap: 8px">
+      <form class="row wrap" style="gap: 8px" @submit.prevent="runAiCoaching">
         <input
           v-model="coachFocus"
-          class="input"
+          class="input grow"
           :placeholder="$t('ai.coachFocusPlaceholder')"
           :aria-label="$t('ai.coachFocusPlaceholder')"
           :disabled="coachStreaming"
-          @keydown.enter.prevent="runAiCoaching"
         />
-      </div>
+        <button
+          v-if="coachStreaming"
+          type="button"
+          class="btn"
+          @click="stopAiCoaching"
+        >
+          <Icon name="close" :size="14" /> {{ $t('ai.coachStop') }}
+        </button>
+        <button
+          v-else
+          type="submit"
+          class="btn btn-primary"
+          :disabled="aiStatus !== null && !aiStatus.enabled"
+        >
+          <Icon name="sparkles" :size="15" /> {{ $t('ai.coachAnalyze') }}
+        </button>
+      </form>
 
       <p v-if="aiStatus && !aiStatus.enabled" class="field-hint mt-8">
         {{ $t('ai.notConfiguredHint') }}
@@ -335,9 +449,11 @@ onMounted(load);
               :key="task.id"
               :task="task"
               :today="data.today"
+              show-start
               @toggle="toggleTask"
-              @edit="() => $router.push('/planner')"
-              @remove="() => $router.push('/planner')"
+              @start="startTask"
+              @edit="editInPlanner"
+              @remove="removeTask"
             />
           </div>
         </section>
@@ -346,38 +462,39 @@ onMounted(load);
           <div class="card-head">
             <div>
               <h2 class="card-title">{{ $t('dashboard.studyLast7') }}</h2>
-              <p class="card-hint">
-                {{ $t('dashboard.streakNote', { days: data.study.streakDays }) }}
+              <p class="card-hint row" style="gap: 5px">
+                <Icon name="flame" :size="14" :class="data.study.streakDays > 0 ? 'text-danger' : 'muted'" />
+                <span>{{ $t('dashboard.streakNote', { days: data.study.streakDays }) }}</span>
               </p>
             </div>
-            <RouterLink to="/planner" class="link-btn">{{ $t('dashboard.logTime') }}</RouterLink>
+            <RouterLink to="/planner?action=session" class="link-btn">{{ $t('dashboard.logTime') }}</RouterLink>
           </div>
 
           <div class="grid cols-2">
             <div>
               <div class="progress-meta">
                 <span>{{ $t('common.today') }}</span>
-                <span>{{ formatMinutes(data.study.todayMinutes) }} / {{ formatMinutes(data.settings.dailyGoalMinutes) }}</span>
+                <span class="tabular">
+                  {{ formatMinutes(data.study.todayMinutes) }} / {{ formatMinutes(data.settings.dailyGoalMinutes) }}
+                  ({{ todayGoalPercent }}%)
+                </span>
               </div>
               <ProgressBar
-                :value="
-                  data.settings.dailyGoalMinutes > 0
-                    ? (data.study.todayMinutes / data.settings.dailyGoalMinutes) * 100
-                    : 0
-                "
+                :value="todayGoalPercent"
+                :tone="todayGoalPercent >= 100 ? 'success' : 'accent'"
               />
             </div>
             <div>
               <div class="progress-meta">
                 <span>{{ $t('dashboard.thisWeek') }}</span>
-                <span>{{ formatMinutes(data.study.weekMinutes) }} / {{ formatMinutes(data.settings.weeklyGoalMinutes) }}</span>
+                <span class="tabular">
+                  {{ formatMinutes(data.study.weekMinutes) }} / {{ formatMinutes(data.settings.weeklyGoalMinutes) }}
+                  ({{ weekGoalPercent }}%)
+                </span>
               </div>
               <ProgressBar
-                :value="
-                  data.settings.weeklyGoalMinutes > 0
-                    ? (data.study.weekMinutes / data.settings.weeklyGoalMinutes) * 100
-                    : 0
-                "
+                :value="weekGoalPercent"
+                :tone="weekGoalPercent >= 100 ? 'success' : 'accent'"
               />
             </div>
           </div>
@@ -389,7 +506,13 @@ onMounted(load);
               icon="clock"
             />
           </div>
-          <MiniBarChart v-else class="mt-16" :items="data.study.last7Days" />
+          <MiniBarChart
+            v-else
+            class="mt-16"
+            :items="data.study.last7Days"
+            :daily-goal-minutes="data.settings.dailyGoalMinutes"
+            :today="data.today"
+          />
         </section>
 
         <section class="card">
@@ -398,7 +521,7 @@ onMounted(load);
               <h2 class="card-title">{{ $t('dashboard.overdueTitle') }}</h2>
               <p class="card-hint">{{ $t('dashboard.overdueHint') }}</p>
             </div>
-            <span class="badge" :class="data.tasks.overdue.length ? 'badge-warning' : 'badge-neutral'">
+            <span class="badge tabular" :class="data.tasks.overdue.length ? 'badge-warning' : 'badge-neutral'">
               {{ data.tasks.overdue.length }}
             </span>
           </div>
@@ -413,10 +536,10 @@ onMounted(load);
               :today="data.today"
               show-date
               @toggle="toggleTask"
-              @edit="() => $router.push('/planner')"
-              @remove="() => $router.push('/planner')"
+              @edit="editInPlanner"
+              @remove="removeTask"
             />
-            <RouterLink to="/planner" class="link-btn mt-8">{{ $t('dashboard.rescheduleInPlanner') }}</RouterLink>
+            <RouterLink to="/planner" class="link-btn mt-12">{{ $t('dashboard.rescheduleInPlanner') }}</RouterLink>
           </div>
         </section>
       </div>
@@ -436,9 +559,13 @@ onMounted(load);
           <div v-else>
             <div class="progress-meta">
               <span>{{ $t('dashboard.portfolioProgress', { done: data.projects.completedFeatures, total: data.projects.totalFeatures }) }}</span>
-              <strong>{{ data.projects.progress }}%</strong>
+              <strong class="tabular">{{ data.projects.progress }}%</strong>
             </div>
-            <ProgressBar :value="data.projects.progress" size="lg" />
+            <ProgressBar
+              :value="data.projects.progress"
+              :tone="data.projects.progress === 100 ? 'success' : 'accent'"
+              size="lg"
+            />
             <p class="card-hint mt-8">
               {{ $t('dashboard.portfolioCount', { count: data.projects.projectsTotal }) }}
             </p>
@@ -455,17 +582,24 @@ onMounted(load);
           </div>
           <div class="grid cols-3">
             <div>
-              <div class="stat-value">{{ data.interview.mastered }}</div>
+              <div class="stat-value tabular">{{ data.interview.mastered }}</div>
               <div class="stat-note">{{ $t('dashboard.mastered') }}</div>
             </div>
             <div>
-              <div class="stat-value">{{ data.interview.reviewing }}</div>
+              <div class="stat-value tabular">{{ data.interview.reviewing }}</div>
               <div class="stat-note">{{ $t('dashboard.reviewing') }}</div>
             </div>
             <div>
-              <div class="stat-value">{{ data.interview.questionsTotal }}</div>
+              <div class="stat-value tabular">{{ data.interview.questionsTotal }}</div>
               <div class="stat-note">{{ $t('dashboard.questions') }}</div>
             </div>
+          </div>
+          <div v-if="data.interview.topicsTotal > 0" class="mt-12">
+            <ProgressBar
+              :value="interviewMasteredPercent"
+              :tone="interviewMasteredPercent === 100 ? 'success' : 'accent'"
+              size="sm"
+            />
           </div>
           <p class="card-hint mt-8">
             {{ $t('dashboard.reviewedWeek', { count: data.interview.reviewedThisWeek }) }}
@@ -490,10 +624,17 @@ onMounted(load);
             </EmptyState>
           </div>
           <div v-else>
-            <div class="grid cols-3">
-              <div v-for="status in jobOrder" :key="status">
-                <div class="stat-value">{{ data.jobs.byStatus[status] }}</div>
-                <div class="stat-note">{{ jobStatusLabels[status] }}</div>
+            <div class="grid cols-2" style="gap: 8px">
+              <div
+                v-for="status in jobOrder"
+                :key="status"
+                class="row-between"
+                style="padding: 7px 10px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border)"
+              >
+                <span class="badge" :class="`badge-${badgeToneForJobStatus(status)}`">
+                  {{ jobStatusLabels[status] }}
+                </span>
+                <strong class="tabular">{{ data.jobs.byStatus[status] }}</strong>
               </div>
             </div>
             <div class="divider" />
@@ -527,23 +668,29 @@ onMounted(load);
           <ul class="mt-16 stack-sm">
             <li class="row-between">
               <span class="muted">{{ $t('dashboard.completedToday') }}</span>
-              <strong>{{ data.tasks.completedToday }}</strong>
+              <strong class="tabular">{{ data.tasks.completedToday }}</strong>
             </li>
             <li class="row-between">
               <span class="muted">{{ $t('dashboard.weekCompleted') }}</span>
-              <strong>{{ data.tasks.weekCompleted }}</strong>
+              <strong class="tabular">{{ data.tasks.weekCompleted }}</strong>
             </li>
             <li class="row-between">
               <span class="muted">{{ $t('dashboard.totalSessions') }}</span>
-              <strong>{{ data.study.totalMinutes > 0 ? $t('common.yes') : $t('common.no') }}</strong>
+              <span class="row" style="gap: 6px">
+                <span class="status-dot" :class="data.study.totalMinutes > 0 ? 'on' : 'off'" />
+                <strong>{{ data.study.totalMinutes > 0 ? $t('common.yes') : $t('common.no') }}</strong>
+              </span>
             </li>
             <li class="row-between">
               <span class="muted">{{ $t('dashboard.notes') }}</span>
-              <strong>{{ data.dataStatus.notes ? $t('common.yes') : $t('common.no') }}</strong>
+              <span class="row" style="gap: 6px">
+                <span class="status-dot" :class="data.dataStatus.notes ? 'on' : 'off'" />
+                <strong>{{ data.dataStatus.notes ? $t('common.yes') : $t('common.no') }}</strong>
+              </span>
             </li>
             <li class="row-between">
               <span class="muted">{{ $t('dashboard.todayTask') }}</span>
-              <strong>
+              <strong class="tabular">
                 {{ $t('dashboard.todoCount', { label: taskStatusLabels.todo, count: data.tasks.today.filter((t) => t.status === 'todo').length }) }}
               </strong>
             </li>
