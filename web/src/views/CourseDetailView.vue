@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import type {
@@ -29,6 +29,7 @@ import {
 } from '../lib/labels';
 import { useToast } from '../composables/useToast';
 import { confirmAction } from '../composables/useConfirm';
+import { useFocusTimer } from '../composables/useFocusTimer';
 import PageHeader from '../components/PageHeader.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import EmptyState from '../components/EmptyState.vue';
@@ -39,6 +40,35 @@ const props = defineProps<{ id: number }>();
 const router = useRouter();
 const toast = useToast();
 const { t } = useI18n();
+const focusTimer = useFocusTimer();
+
+function startCourseFocus() {
+  if (!course.value) return;
+  focusTimer.startFocusFor({
+    courseId: course.value.id,
+    courseTitle: course.value.title,
+  });
+}
+
+function handleSessionLogged() {
+  void load();
+}
+
+async function planTopicToday(topic: CourseTopic) {
+  if (!course.value) return;
+  try {
+    await api.createTask({
+      title: topic.title,
+      description: topic.description,
+      type: 'study',
+      relatedCourseId: course.value.id,
+      priority: course.value.priority,
+    });
+    toast.success(t('course.plannedToast', { title: topic.title }));
+  } catch (err) {
+    toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
+  }
+}
 
 const course = ref<CourseDetail | null>(null);
 const notes = ref<LearningNote[]>([]);
@@ -339,7 +369,13 @@ async function removeSession(id: number) {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  window.addEventListener('lr:session-logged', handleSessionLogged);
+  void load();
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('lr:session-logged', handleSessionLogged);
+});
 watch(
   () => props.id,
   () => void load(),
@@ -379,6 +415,9 @@ watch(
         >
           <Icon name="external" :size="16" /> {{ $t('course.courseLink') }}
         </a>
+        <button type="button" class="btn" @click="startCourseFocus">
+          <Icon name="timer" :size="16" /> {{ $t('course.focusBtn') }}
+        </button>
         <RouterLink :to="`/planner?courseId=${course.id}&action=session`" class="btn">
           <Icon name="clock" :size="16" /> {{ $t('course.logTime') }}
         </RouterLink>
@@ -509,6 +548,16 @@ watch(
                 <div v-if="topic.description" class="muted">{{ topic.description }}</div>
               </label>
               <div class="check-actions">
+                <button
+                  v-if="!topic.isCompleted"
+                  type="button"
+                  class="btn btn-ghost btn-icon btn-sm"
+                  :title="$t('course.planToday')"
+                  :aria-label="$t('course.planToday')"
+                  @click="planTopicToday(topic)"
+                >
+                  <Icon name="calendar-plus" :size="14" />
+                </button>
                 <button type="button" class="btn btn-ghost btn-icon btn-sm" @click="openTopicEdit(topic)">
                   <Icon name="edit" :size="14" />
                 </button>
@@ -571,6 +620,16 @@ watch(
                 <div v-if="topic.description" class="muted">{{ topic.description }}</div>
               </label>
               <div class="check-actions">
+                <button
+                  v-if="!topic.isCompleted"
+                  type="button"
+                  class="btn btn-ghost btn-icon btn-sm"
+                  :title="$t('course.planToday')"
+                  :aria-label="$t('course.planToday')"
+                  @click="planTopicToday(topic)"
+                >
+                  <Icon name="calendar-plus" :size="14" />
+                </button>
                 <button type="button" class="btn btn-ghost btn-icon btn-sm" @click="openTopicEdit(topic)">
                   <Icon name="edit" :size="14" />
                 </button>

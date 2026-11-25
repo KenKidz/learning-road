@@ -12,6 +12,7 @@ const props = defineProps<{
   showDate?: boolean;
   showStart?: boolean;
   showLogSession?: boolean;
+  showFocus?: boolean;
   hideEdit?: boolean;
 }>();
 
@@ -21,6 +22,7 @@ const emit = defineEmits<{
   remove: [task: Task];
   start: [task: Task];
   logSession: [task: Task];
+  focus: [task: Task];
 }>();
 
 const isDone = computed(() => props.task.status === 'done');
@@ -97,6 +99,16 @@ function toggle() {
         @click="emit('start', task)"
       >
         <Icon name="play" :size="14" />
+      </button>
+      <button
+        v-if="showFocus && !isDone && !cancelled"
+        type="button"
+        class="btn btn-ghost btn-icon btn-sm"
+        :title="$t('taskRow.focus')"
+        :aria-label="$t('taskRow.focus')"
+        @click="emit('focus', task)"
+      >
+        <Icon name="timer" :size="14" />
       </button>
       <button
         v-if="showLogSession && !cancelled"

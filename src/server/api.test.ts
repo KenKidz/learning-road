@@ -12,14 +12,18 @@ import type {
   AiStatus,
   AiStudyPlanResponse,
   AiWeeklyCoachResponse,
+  AnalyticsData,
   CourseDetail,
   CoursesResponse,
   DashboardData,
   ExportPayload,
+  ImportPreviewResult,
+  ImportResult,
   InterviewResponse,
   JobsResponse,
   NotesResponse,
   ProjectsResponse,
+  SearchResponse,
   SessionsResponse,
   TasksResponse,
 } from '../shared/types';
@@ -522,5 +526,115 @@ describe('ai integration', () => {
       if (previousModel === undefined) delete process.env.AI_MODEL;
       else process.env.AI_MODEL = previousModel;
     }
+  });
+
+  it('supports universal search, study analytics, due questions count, and safe merge import', async () => {
+    const emptySearch = (await request(app).get('/api/search?q=').expect(200))
+      .body as SearchResponse;
+    expect(emptySearch.courses).toEqual([]);
+
+    const sqlSearch = (await request(app).get('/api/search?q=SQL').expect(200))
+      .body as SearchResponse;
+    expect(sqlSearch.courses.some((c) => c.title.includes('SQL'))).toBe(true);
+
+    const analyticsEmpty = (await request(app).get('/api/analytics?days=90').expect(200))
+      .body as AnalyticsData;
+    expect(analyticsEmpty.days).toBe(90);
+    expect(analyticsEmpty.heatmap).toHaveLength(90);
+    expect(analyticsEmpty.weeklyTrend).toHaveLength(12);
+    expect(analyticsEmpty.activeDaysCount).toBe(0);
+    expect(analyticsEmpty.paceForecast.estimatedWeeksToFinish).toBeNull();
+
+    const coursesRes = (await request(app).get('/api/courses').expect(200)).body as CoursesResponse;
+    const firstCourse = coursesRes.courses[0]!;
+    const createdSession = await request(app)
+      .post('/api/study-sessions')
+      .send({
+        courseId: firstCourse.id,
+        startedAt: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+        durationMinutes: 45,
+        notes: 'Analytics session test',
+      })
+      .expect(201);
+
+    const createdTask = await request(app)
+      .post('/api/tasks')
+      .send({
+        title: 'Analytics accuracy task',
+        type: 'study',
+        estimatedMinutes: 60,
+        actualMinutes: 45,
+        status: 'done',
+      })
+      .expect(201);
+
+    const analyticsAfter = (await request(app).get('/api/analytics?days=90').expect(200))
+      .body as AnalyticsData;
+    expect(analyticsAfter.activeDaysCount).toBe(1);
+    expect(analyticsAfter.taskAccuracy.completedWithEstimate).toBeGreaterThanOrEqual(1);
+    expect(analyticsAfter.taskAccuracy.ratioPercent).not.toBeNull();
+
+    await request(app).delete(`/api/study-sessions/${createdSession.body.id}`).expect(204);
+    await request(app).delete(`/api/tasks/${createdTask.body.id}`).expect(204);
+
+    const dashBefore = await dashboard();
+    expect(dashBefore.interview.dueQuestionsCount).toBeGreaterThan(0);
+
+    const interview = (await request(app).get('/api/interview').expect(200))
+      .body as InterviewResponse;
+    const targetQuestion = interview.topics[0]!.questions[0]!;
+    await request(app)
+      .patch(`/api/interview/questions/${targetQuestion.id}`)
+      .send({ confidenceLevel: 5, lastReviewedAt: new Date().toISOString() })
+      .expect(200);
+
+    const dashAfter = await dashboard();
+    expect(dashAfter.interview.dueQuestionsCount).toBeLessThan(
+      dashBefore.interview.dueQuestionsCount,
+    );
+
+    const exported = (await request(app).get('/api/export').expect(200)).body as ExportPayload;
+    const previewSame = (
+      await request(app).post('/api/import/preview').send(exported).expect(200)
+    ).body as ImportPreviewResult;
+    expect(previewSame.merge.courses.toAdd).toBe(0);
+    expect(previewSame.merge.tasks.toAdd).toBe(0);
+
+    const newBackup: ExportPayload = {
+      ...exported,
+      data: {
+        ...exported.data,
+        learningNotes: [
+          ...exported.data.learningNotes,
+          {
+            id: 9999,
+            title: 'Merged Note From Backup',
+            contentMarkdown: 'Restored cleanly via merge mode',
+            relatedType: 'general',
+            relatedId: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        ],
+      },
+    };
+
+    const previewWithNew = (
+      await request(app).post('/api/import/preview').send(newBackup).expect(200)
+    ).body as ImportPreviewResult;
+    expect(previewWithNew.merge.learningNotes.toAdd).toBe(1);
+
+    const merged = (
+      await request(app).post('/api/import?mode=merge').send(newBackup).expect(200)
+    ).body as ImportResult;
+    expect(merged.mode).toBe('merge');
+    expect(merged.imported.learningNotes).toBe(1);
+
+    const mergedSecondRun = (
+      await request(app).post('/api/import?mode=merge').send(newBackup).expect(200)
+    ).body as ImportResult;
+    expect(mergedSecondRun.imported.learningNotes).toBe(0);
+
+    await request(app).post('/api/import?mode=invalid').send(newBackup).expect(400);
   });
 });

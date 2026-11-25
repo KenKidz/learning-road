@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import type { AiStatus, DashboardData, JobStatus, Task } from '@shared/types';
+import type { AiStatus, AnalyticsData, DashboardData, JobStatus, Task } from '@shared/types';
 import { api, ApiError, streamAiWeeklyCoaching } from '../lib/api';
 import { clampPercent, formatDate, formatMinutes } from '../lib/format';
 import {
@@ -12,10 +12,13 @@ import {
 } from '../lib/labels';
 import { useToast } from '../composables/useToast';
 import { confirmAction } from '../composables/useConfirm';
+import { useFocusTimer } from '../composables/useFocusTimer';
 import PageHeader from '../components/PageHeader.vue';
 import StatCard from '../components/StatCard.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import MiniBarChart from '../components/MiniBarChart.vue';
+import StudyHeatmap from '../components/StudyHeatmap.vue';
+import WeeklyTrendChart from '../components/WeeklyTrendChart.vue';
 import TaskRow from '../components/TaskRow.vue';
 import EmptyState from '../components/EmptyState.vue';
 import MarkdownView from '../components/MarkdownView.vue';
@@ -23,6 +26,7 @@ import Icon from '../components/Icon.vue';
 
 const router = useRouter();
 const data = ref<DashboardData | null>(null);
+const analytics = ref<AnalyticsData | null>(null);
 const aiStatus = ref<AiStatus | null>(null);
 const loading = ref(true);
 const error = ref('');
@@ -35,6 +39,21 @@ const coachError = ref('');
 let coachAbortController: AbortController | null = null;
 const toast = useToast();
 const { t } = useI18n();
+const focusTimer = useFocusTimer();
+
+function focusOnTask(task: Task) {
+  focusTimer.startFocusFor({
+    courseId: task.relatedCourseId,
+    courseTitle: task.courseTitle ?? null,
+    taskId: task.id,
+    taskTitle: task.title,
+    workMinutes: task.estimatedMinutes ?? undefined,
+  });
+}
+
+function handleSessionLogged() {
+  void load();
+}
 
 const jobOrder: JobStatus[] = ['saved', 'applied', 'interviewing', 'offer', 'rejected', 'withdrawn'];
 
@@ -69,12 +88,14 @@ async function load() {
   loading.value = true;
   error.value = '';
   try {
-    const [dashboardData, status] = await Promise.all([
+    const [dashboardData, status, analyticsData] = await Promise.all([
       api.dashboard(),
       api.aiStatus().catch(() => ({ enabled: false, model: '', baseUrl: '' })),
+      api.analytics(180).catch(() => null),
     ]);
     data.value = dashboardData;
     aiStatus.value = status;
+    analytics.value = analyticsData;
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : t('errors.dashboardLoad');
   } finally {
@@ -145,6 +166,7 @@ async function copyCoaching() {
 
 onBeforeUnmount(() => {
   coachAbortController?.abort();
+  window.removeEventListener('lr:session-logged', handleSessionLogged);
 });
 
 async function toggleTask(task: Task) {
@@ -200,7 +222,10 @@ function editInPlanner(task: Task) {
   });
 }
 
-onMounted(load);
+onMounted(() => {
+  window.addEventListener('lr:session-logged', handleSessionLogged);
+  void load();
+});
 </script>
 
 <template>
@@ -450,8 +475,10 @@ onMounted(load);
               :task="task"
               :today="data.today"
               show-start
+              show-focus
               @toggle="toggleTask"
               @start="startTask"
+              @focus="focusOnTask"
               @edit="editInPlanner"
               @remove="removeTask"
             />
@@ -604,6 +631,12 @@ onMounted(load);
           <p class="card-hint mt-8">
             {{ $t('dashboard.reviewedWeek', { count: data.interview.reviewedThisWeek }) }}
           </p>
+          <div v-if="data.interview.dueQuestionsCount > 0" class="mt-12">
+            <RouterLink to="/interview?tab=practice" class="btn btn-sm">
+              <Icon name="flip" :size="14" />
+              {{ $t('dashboard.dueQuestionsCta', { count: data.interview.dueQuestionsCount }) }}
+            </RouterLink>
+          </div>
         </section>
 
         <section class="card">
@@ -701,5 +734,122 @@ onMounted(load);
         </section>
       </div>
     </div>
+
+    <section v-if="analytics" class="card">
+      <div class="card-head wrap">
+        <div>
+          <h2 class="card-title">
+            <Icon name="bar-chart" :size="16" class="text-info" />
+            {{ $t('analytics.title') }}
+          </h2>
+          <p class="card-hint">{{ $t('analytics.subtitle') }}</p>
+        </div>
+        <div class="row wrap" style="gap: 8px">
+          <span class="badge badge-info tabular">
+            {{ $t('analytics.activeDays', { count: analytics.activeDaysCount }) }}
+          </span>
+          <span class="badge badge-neutral tabular">
+            {{ $t('analytics.longestStreak', { days: analytics.longestStreakDays }) }}
+          </span>
+        </div>
+      </div>
+
+      <div class="stack">
+        <div>
+          <h3 class="mb-8">{{ $t('analytics.heatmapTitle') }}</h3>
+          <StudyHeatmap :days="analytics.heatmap" :today="analytics.today" />
+        </div>
+
+        <div>
+          <h3 class="mb-8">{{ $t('analytics.weeklyTitle') }}</h3>
+          <WeeklyTrendChart
+            :items="analytics.weeklyTrend"
+            :weekly-goal-minutes="analytics.weeklyGoalMinutes"
+          />
+        </div>
+
+        <div class="grid cols-2">
+          <div class="feature-card">
+            <h3>{{ $t('analytics.categoryDistribution') }}</h3>
+            <div class="row wrap mt-8" style="gap: 8px">
+              <span
+                v-for="cat in analytics.byCategory"
+                :key="cat.category"
+                class="badge tabular"
+                :class="`badge-cat-${cat.category}`"
+              >
+                {{ $t(`labels.category.${cat.category}`) }}: {{ formatMinutes(cat.studyMinutes) }}
+              </span>
+            </div>
+            <p v-if="analytics.topCourses.length === 0" class="muted mt-12">
+              {{ $t('analytics.noCategoryData') }}
+            </p>
+            <ul v-else class="stack-sm mt-12">
+              <li
+                v-for="course in analytics.topCourses.slice(0, 5)"
+                :key="course.courseId"
+                class="row-between"
+                style="gap: 8px"
+              >
+                <RouterLink :to="`/roadmap/${course.courseId}`" class="task-title">
+                  {{ course.title }}
+                </RouterLink>
+                <span class="muted tabular nowrap">
+                  {{ formatMinutes(course.studyMinutes) }} · {{ course.progress }}%
+                </span>
+              </li>
+            </ul>
+          </div>
+
+          <div class="feature-card">
+            <h3>{{ $t('analytics.forecastTitle') }}</h3>
+            <div class="stack-sm mt-12">
+              <div>
+                <div class="field-label">{{ $t('analytics.taskAccuracyLabel') }}</div>
+                <p v-if="analytics.taskAccuracy.ratioPercent !== null" class="mt-8 tabular">
+                  {{
+                    $t('analytics.taskAccuracyValue', {
+                      ratio: analytics.taskAccuracy.ratioPercent,
+                      actual: formatMinutes(analytics.taskAccuracy.totalActualMinutes),
+                      estimated: formatMinutes(analytics.taskAccuracy.totalEstimatedMinutes),
+                      count: analytics.taskAccuracy.completedWithEstimate,
+                    })
+                  }}
+                </p>
+                <p v-else class="muted mt-8">{{ $t('analytics.noAccuracyData') }}</p>
+              </div>
+
+              <div class="divider" style="margin: 8px 0" />
+
+              <div>
+                <div class="field-label">{{ $t('analytics.paceLabel') }}</div>
+                <p v-if="analytics.paceForecast.avgWeeklyMinutes > 0" class="mt-8 tabular">
+                  {{
+                    $t('analytics.paceValue', {
+                      duration: formatMinutes(analytics.paceForecast.avgWeeklyMinutes),
+                      hours: analytics.paceForecast.remainingCourseHours,
+                    })
+                  }}
+                </p>
+                <p v-else class="muted mt-8">{{ $t('analytics.noForecastData') }}</p>
+
+                <template v-if="analytics.paceForecast.estimatedWeeksToFinish !== null">
+                  <div class="field-label mt-12">{{ $t('analytics.etaLabel') }}</div>
+                  <p class="mt-8 tabular">
+                    <strong>
+                      {{
+                        $t('analytics.etaValue', {
+                          weeks: analytics.paceForecast.estimatedWeeksToFinish,
+                        })
+                      }}
+                    </strong>
+                  </p>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   </div>
 </template>

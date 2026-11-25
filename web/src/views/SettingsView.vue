@@ -1,13 +1,21 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import type { AiStatus, AuthStatus, ExportPayload, ImportResult, UserSettings } from '@shared/types';
+import type {
+  AiStatus,
+  AuthStatus,
+  ExportPayload,
+  ImportMode,
+  ImportPreviewResult,
+  ImportResult,
+  UserSettings,
+} from '@shared/types';
 import { api, ApiError, downloadExport } from '../lib/api';
-import { todayInTimezone } from '../lib/format';
+import { formatDateTime, todayInTimezone } from '../lib/format';
 import { useToast } from '../composables/useToast';
-import { confirmAction } from '../composables/useConfirm';
 import PageHeader from '../components/PageHeader.vue';
 import EmptyState from '../components/EmptyState.vue';
+import BaseModal from '../components/BaseModal.vue';
 import Icon from '../components/Icon.vue';
 
 const toast = useToast();
@@ -23,6 +31,10 @@ const formError = ref('');
 const exporting = ref(false);
 const importing = ref(false);
 const importedSummary = ref<ImportResult | null>(null);
+const showImportModal = ref(false);
+const pendingImportPayload = ref<ExportPayload | null>(null);
+const importPreview = ref<ImportPreviewResult | null>(null);
+const importMode = ref<ImportMode>('merge');
 
 const weekDayOrder = [1, 2, 3, 4, 5, 6, 0];
 
@@ -196,16 +208,29 @@ async function importFile(event: Event) {
       toast.error(t('settings.invalidFile'));
       return;
     }
-    const confirmed = await confirmAction({
-      title: t('settings.importConfirmTitle'),
-      message: t('settings.importConfirmText'),
-      confirmLabel: t('settings.importConfirm'),
-      danger: true,
-    });
-    if (!confirmed) return;
     importing.value = true;
-    const result = await api.importData(payload);
+    const preview = await api.previewImport(payload);
+    pendingImportPayload.value = payload;
+    importPreview.value = preview;
+    importMode.value = 'merge';
+    showImportModal.value = true;
+  } catch (err) {
+    toast.error(err instanceof ApiError ? err.message : t('settings.invalidImport'));
+  } finally {
+    importing.value = false;
+    input.value = '';
+  }
+}
+
+async function confirmImport() {
+  if (!pendingImportPayload.value || importing.value) return;
+  importing.value = true;
+  try {
+    const result = await api.importData(pendingImportPayload.value, importMode.value);
     importedSummary.value = result;
+    showImportModal.value = false;
+    pendingImportPayload.value = null;
+    importPreview.value = null;
     toast.success(t('settings.imported'));
     await load();
     window.setTimeout(() => window.location.reload(), 800);
@@ -213,8 +238,14 @@ async function importFile(event: Event) {
     toast.error(err instanceof ApiError ? err.message : t('settings.invalidImport'));
   } finally {
     importing.value = false;
-    input.value = '';
   }
+}
+
+function closeImportModal() {
+  if (importing.value) return;
+  showImportModal.value = false;
+  pendingImportPayload.value = null;
+  importPreview.value = null;
 }
 
 onMounted(load);
@@ -517,4 +548,98 @@ onMounted(load);
       </ul>
     </section>
   </div>
+
+  <BaseModal
+    v-if="showImportModal && importPreview"
+    :title="$t('settings.previewTitle')"
+    wide
+    @close="closeImportModal"
+  >
+    <div class="stack">
+      <p class="card-hint">
+        {{ $t('settings.previewExportedAt', { date: formatDateTime(importPreview.exportedAt) }) }}
+      </p>
+
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>{{ $t('settings.previewColEntity') }}</th>
+              <th class="tabular">{{ $t('settings.previewColCurrent') }}</th>
+              <th class="tabular">{{ $t('settings.previewColIncoming') }}</th>
+              <th class="tabular">{{ $t('settings.previewColMergeAdd') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="row in [
+                { key: 'courses', label: $t('palette.groupCourses') },
+                { key: 'tasks', label: $t('palette.groupTasks') },
+                { key: 'studySessions', label: $t('planner.historySessions') },
+                { key: 'projects', label: $t('planner.taskProject') },
+                { key: 'interviewTopics', label: $t('palette.groupTopics') },
+                { key: 'interviewChecklist', label: $t('interview.checklist') },
+                { key: 'jobApplications', label: $t('palette.groupJobs') },
+                { key: 'learningNotes', label: $t('palette.groupNotes') },
+              ] as const"
+              :key="row.key"
+            >
+              <td>{{ row.label }}</td>
+              <td class="tabular">{{ importPreview.existing[row.key] }}</td>
+              <td class="tabular">{{ importPreview.merge[row.key].incoming }}</td>
+              <td class="tabular">
+                <span class="badge" :class="importPreview.merge[row.key].toAdd > 0 ? 'badge-info' : 'badge-neutral'">
+                  +{{ importPreview.merge[row.key].toAdd }}
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="stack-sm">
+        <div class="field-label">{{ $t('settings.importModeLabel') }}</div>
+        <div class="pill-group">
+          <button
+            type="button"
+            class="pill-btn"
+            :class="{ active: importMode === 'merge' }"
+            @click="importMode = 'merge'"
+          >
+            {{ $t('settings.importModeMerge') }}
+          </button>
+          <button
+            type="button"
+            class="pill-btn"
+            :class="{ active: importMode === 'replace' }"
+            @click="importMode = 'replace'"
+          >
+            {{ $t('settings.importModeReplace') }}
+          </button>
+        </div>
+        <p v-if="importMode === 'merge'" class="field-hint">
+          {{ $t('settings.importModeMergeHint') }}
+        </p>
+        <p v-else class="form-error">
+          {{ $t('settings.importConfirmText') }}
+        </p>
+      </div>
+    </div>
+
+    <template #footer>
+      <button type="button" class="btn" :disabled="importing" @click="closeImportModal">
+        {{ $t('common.cancel') }}
+      </button>
+      <button
+        type="button"
+        class="btn"
+        :class="importMode === 'replace' ? 'btn-danger' : 'btn-primary'"
+        :disabled="importing"
+        @click="confirmImport"
+      >
+        <span v-if="importing" class="spinner" />
+        {{ importMode === 'merge' ? $t('settings.importMergeConfirm') : $t('settings.importConfirm') }}
+      </button>
+    </template>
+  </BaseModal>
 </template>

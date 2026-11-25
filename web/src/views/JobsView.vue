@@ -11,6 +11,7 @@ import { confirmAction } from '../composables/useConfirm';
 import PageHeader from '../components/PageHeader.vue';
 import EmptyState from '../components/EmptyState.vue';
 import BaseModal from '../components/BaseModal.vue';
+import KanbanBoard, { type KanbanColumn } from '../components/KanbanBoard.vue';
 import Icon from '../components/Icon.vue';
 
 const toast = useToast();
@@ -32,8 +33,28 @@ const busy = ref(false);
 const formError = ref('');
 const statusFilter = ref<JobStatus | 'all'>('all');
 const search = ref('');
+const viewMode = ref<'table' | 'board'>(
+  typeof window !== 'undefined' && window.localStorage.getItem('lr-jobs-view') === 'board'
+    ? 'board'
+    : 'table',
+);
 const showModal = ref(false);
 const editing = ref<JobApplication | null>(null);
+
+function setViewMode(mode: 'table' | 'board') {
+  viewMode.value = mode;
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem('lr-jobs-view', mode);
+  }
+}
+
+const jobColumns = computed<KanbanColumn[]>(() =>
+  JOB_STATUSES.map((status) => ({
+    key: status,
+    label: jobStatusLabels[status],
+    tone: badgeToneForJobStatus(status),
+  })),
+);
 
 const form = reactive({
   company: '',
@@ -163,11 +184,24 @@ async function save() {
 async function changeStatus(application: JobApplication, event: Event) {
   const status = (event.target as HTMLSelectElement).value as JobStatus;
   if (status === application.status) return;
+  await moveJob({ item: application, toColumn: status });
+}
+
+async function moveJob(payload: { item: JobApplication; toColumn: string }) {
+  const status = payload.toColumn as JobStatus;
+  const previous = payload.item.status;
+  if (status === previous) return;
+  payload.item.status = status;
+  summary.value[previous] = Math.max(0, summary.value[previous] - 1);
+  summary.value[status] += 1;
   try {
-    await api.updateJob(application.id, { status });
+    await api.updateJob(payload.item.id, { status });
     toast.success(t('jobs.statusUpdated', { status: jobStatusLabels[status] }));
     await load();
   } catch (err) {
+    payload.item.status = previous;
+    summary.value[status] = Math.max(0, summary.value[status] - 1);
+    summary.value[previous] += 1;
     toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
   }
 }
@@ -310,6 +344,24 @@ onMounted(load);
             </button>
           </div>
           <span class="badge badge-neutral tabular">{{ $t('jobs.showing', { count: filtered.length }) }}</span>
+          <div class="tabs">
+            <button
+              type="button"
+              class="tab"
+              :class="{ active: viewMode === 'table' }"
+              @click="setViewMode('table')"
+            >
+              <Icon name="table" :size="13" /> {{ $t('jobs.viewTable') }}
+            </button>
+            <button
+              type="button"
+              class="tab"
+              :class="{ active: viewMode === 'board' }"
+              @click="setViewMode('board')"
+            >
+              <Icon name="board" :size="13" /> {{ $t('jobs.viewBoard') }}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -334,6 +386,66 @@ onMounted(load);
             <button type="button" class="btn btn-primary btn-sm" @click="openCreate">{{ $t('jobs.addApplication') }}</button>
           </div>
         </EmptyState>
+      </div>
+
+      <div v-else-if="viewMode === 'board'">
+        <KanbanBoard
+          :columns="jobColumns"
+          :items="filtered"
+          :get-column="(item) => item.status"
+          @move="moveJob"
+        >
+          <template #card="{ item, columns, moveTo }">
+            <div class="stack-sm" style="gap: 6px">
+              <div class="row-between" style="gap: 6px; align-items: flex-start">
+                <div class="grow" style="min-width: 0">
+                  <div class="cell-main">{{ item.company }}</div>
+                  <div class="cell-sub">{{ item.position }}</div>
+                </div>
+                <div class="row" style="gap: 2px">
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-icon btn-sm"
+                    :title="$t('jobs.edit')"
+                    @click="openEdit(item)"
+                  >
+                    <Icon name="edit" :size="13" />
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-icon btn-sm btn-danger-hover"
+                    :title="$t('jobs.delete')"
+                    @click="remove(item)"
+                  >
+                    <Icon name="trash" :size="13" />
+                  </button>
+                </div>
+              </div>
+
+              <div class="list-meta">
+                <span v-if="item.appliedAt" class="tabular">{{ formatDate(item.appliedAt) }}</span>
+                <span
+                  v-if="item.followUpAt"
+                  class="tabular"
+                  :class="{ 'text-danger': item.followUpAt <= today }"
+                >
+                  {{ $t('jobs.followUpDate', { date: formatDate(item.followUpAt) }) }}
+                </span>
+              </div>
+
+              <select
+                class="select input-sm"
+                :value="item.status"
+                :aria-label="$t('jobs.statusAria', { company: item.company })"
+                @change="moveTo(item, ($event.target as HTMLSelectElement).value)"
+              >
+                <option v-for="col in columns" :key="col.key" :value="col.key">
+                  {{ col.label }}
+                </option>
+              </select>
+            </div>
+          </template>
+        </KanbanBoard>
       </div>
 
       <div v-else class="table-wrap">

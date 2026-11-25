@@ -3,6 +3,8 @@ import { ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import Icon from './Icon.vue';
 import LocaleSwitcher from './LocaleSwitcher.vue';
+import FocusTimerWidget from './FocusTimerWidget.vue';
+import CommandPalette from './CommandPalette.vue';
 import { useTheme } from '../composables/useTheme';
 
 const props = defineProps<{ authRequired: boolean }>();
@@ -28,6 +30,10 @@ const careerNav = [
 function isActive(to: string): boolean {
   if (to === '/') return route.path === '/';
   return route.path === to || route.path.startsWith(`${to}/`);
+}
+
+function openSearchPalette() {
+  window.dispatchEvent(new CustomEvent('lr:open-command-palette'));
 }
 
 watch(
@@ -60,6 +66,14 @@ watch(
           @click="mobileOpen = false"
         >
           <Icon name="close" :size="16" />
+        </button>
+      </div>
+
+      <div class="sidebar-search-wrap">
+        <button type="button" class="sidebar-search-btn" @click="openSearchPalette">
+          <Icon name="search" :size="14" />
+          <span class="grow" style="text-align: left">{{ $t('palette.trigger') }}</span>
+          <span class="kbd">Ctrl+K</span>
         </button>
       </div>
 
@@ -100,6 +114,7 @@ watch(
       </nav>
 
       <div class="sidebar-footer">
+        <FocusTimerWidget />
         <div class="sidebar-controls">
           <button
             type="button"
@@ -145,6 +160,15 @@ watch(
           </RouterLink>
         </div>
         <div class="row" style="gap: 6px">
+          <button
+            type="button"
+            class="btn btn-ghost btn-icon"
+            :aria-label="$t('palette.trigger')"
+            @click="openSearchPalette"
+          >
+            <Icon name="search" :size="16" />
+          </button>
+          <FocusTimerWidget compact />
           <LocaleSwitcher compact />
           <button
             type="button"
@@ -162,4 +186,5 @@ watch(
       </main>
     </div>
   </div>
+  <CommandPalette />
 </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { RouterLink, useRoute } from 'vue-router';
 import type {
@@ -34,6 +34,7 @@ import {
 } from '../lib/labels';
 import { useToast } from '../composables/useToast';
 import { confirmAction } from '../composables/useConfirm';
+import { useFocusTimer } from '../composables/useFocusTimer';
 import PageHeader from '../components/PageHeader.vue';
 import StatCard from '../components/StatCard.vue';
 import TaskRow from '../components/TaskRow.vue';
@@ -60,6 +61,17 @@ interface TaskFormState {
 const route = useRoute();
 const toast = useToast();
 const { t } = useI18n();
+const focusTimer = useFocusTimer();
+
+function focusOnTask(task: Task) {
+  focusTimer.startFocusFor({
+    courseId: task.relatedCourseId,
+    courseTitle: task.courseTitle ?? null,
+    taskId: task.id,
+    taskTitle: task.title,
+    workMinutes: task.estimatedMinutes ?? undefined,
+  });
+}
 
 const settings = ref<UserSettings | null>(null);
 const today = ref('');
@@ -583,7 +595,12 @@ async function removeSession(session: StudySession) {
   }
 }
 
+function handleSessionLogged() {
+  void loadCurrent();
+}
+
 onMounted(async () => {
+  window.addEventListener('lr:session-logged', handleSessionLogged);
   loading.value = true;
   try {
     await loadReferences();
@@ -596,6 +613,10 @@ onMounted(async () => {
   } finally {
     loading.value = false;
   }
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('lr:session-logged', handleSessionLogged);
 });
 </script>
 
@@ -786,9 +807,11 @@ onMounted(async () => {
             :task="task"
             :today="today"
             show-start
+            show-focus
             show-log-session
             @toggle="toggleTask"
             @start="startTask"
+            @focus="focusOnTask"
             @log-session="openSessionForTask"
             @edit="openTaskEdit"
             @remove="removeTask"
@@ -910,9 +933,11 @@ onMounted(async () => {
               :task="task"
               :today="today"
               show-start
+              show-focus
               show-log-session
               @toggle="toggleTask"
               @start="startTask"
+              @focus="focusOnTask"
               @log-session="openSessionForTask"
               @edit="openTaskEdit"
               @remove="removeTask"

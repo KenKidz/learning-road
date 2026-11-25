@@ -24,6 +24,7 @@ import StatCard from '../components/StatCard.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import EmptyState from '../components/EmptyState.vue';
 import BaseModal from '../components/BaseModal.vue';
+import KanbanBoard, { type KanbanColumn } from '../components/KanbanBoard.vue';
 import Icon from '../components/Icon.vue';
 
 const toast = useToast();
@@ -42,6 +43,26 @@ const featureProjectId = ref<number | null>(null);
 const newChecklist = reactive<Record<number, string>>({});
 const featureFilter = reactive<Record<number, FeatureStatus | 'all'>>({});
 const collapsedChecklists = ref<Set<number>>(new Set());
+const viewMode = ref<'list' | 'board'>(
+  typeof window !== 'undefined' && window.localStorage.getItem('lr-projects-view') === 'board'
+    ? 'board'
+    : 'list',
+);
+
+function setViewMode(mode: 'list' | 'board') {
+  viewMode.value = mode;
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem('lr-projects-view', mode);
+  }
+}
+
+const featureColumns = computed<KanbanColumn[]>(() =>
+  FEATURE_STATUSES.map((status) => ({
+    key: status,
+    label: featureStatusLabels[status],
+    tone: featureStatusTone(status),
+  })),
+);
 
 const projectForm = reactive({
   name: '',
@@ -268,9 +289,33 @@ async function saveFeature() {
 async function updateFeatureStatus(feature: ProjectFeature, event: Event) {
   const status = (event.target as HTMLSelectElement).value as FeatureStatus;
   if (status === feature.status) return;
+  await moveFeature({ item: feature, toColumn: status });
+}
+
+async function moveFeature(payload: { item: ProjectFeature; toColumn: string }) {
+  const status = payload.toColumn as FeatureStatus;
+  const previous = payload.item.status;
+  if (status === previous) return;
+  payload.item.status = status;
   try {
-    await api.updateFeature(feature.id, { status });
+    await api.updateFeature(payload.item.id, { status });
     await load();
+  } catch (err) {
+    payload.item.status = previous;
+    toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
+  }
+}
+
+async function planFeatureToday(project: Project, feature: ProjectFeature) {
+  try {
+    await api.createTask({
+      title: feature.title,
+      description: feature.description,
+      type: 'project',
+      relatedProjectId: project.id,
+      priority: feature.priority,
+    });
+    toast.success(t('projects.plannedToast', { title: feature.title }));
   } catch (err) {
     toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
   }
@@ -452,9 +497,29 @@ onMounted(() => void load(true));
             </button>
           </div>
         </div>
-        <button type="button" class="btn btn-sm" @click="openFeatureCreate(project.id)">
-          <Icon name="plus" :size="14" /> {{ $t('projects.addFeature') }}
-        </button>
+        <div class="row wrap" style="gap: 8px">
+          <div v-if="project.features.length > 0" class="tabs">
+            <button
+              type="button"
+              class="tab"
+              :class="{ active: viewMode === 'list' }"
+              @click="setViewMode('list')"
+            >
+              <Icon name="table" :size="13" /> {{ $t('projects.viewList') }}
+            </button>
+            <button
+              type="button"
+              class="tab"
+              :class="{ active: viewMode === 'board' }"
+              @click="setViewMode('board')"
+            >
+              <Icon name="board" :size="13" /> {{ $t('projects.viewBoard') }}
+            </button>
+          </div>
+          <button type="button" class="btn btn-sm" @click="openFeatureCreate(project.id)">
+            <Icon name="plus" :size="14" /> {{ $t('projects.addFeature') }}
+          </button>
+        </div>
       </div>
 
       <div v-if="project.features.length === 0">
@@ -466,6 +531,69 @@ onMounted(() => void load(true));
             {{ $t('common.clear') }}
           </button>
         </EmptyState>
+      </div>
+      <div v-else-if="viewMode === 'board'">
+        <KanbanBoard
+          :columns="featureColumns"
+          :items="filteredFeatures(project)"
+          :get-column="(item) => item.status"
+          @move="moveFeature"
+        >
+          <template #card="{ item, columns, moveTo }">
+            <div class="stack-sm" style="gap: 6px">
+              <div class="row-between" style="gap: 6px; align-items: flex-start">
+                <strong style="font-size: 13px">{{ item.title }}</strong>
+                <span class="badge" :class="`badge-${badgeToneForPriority(item.priority)}`">
+                  {{ priorityLabels[item.priority] }}
+                </span>
+              </div>
+              <div class="row-between muted tabular" style="font-size: 11.5px">
+                <span>
+                  {{ $t('projects.checklist', { done: item.checklist.filter((c) => c.done).length, total: item.checklist.length }) }}
+                </span>
+                <span>{{ featureProgress(item) }}%</span>
+              </div>
+              <ProgressBar
+                :value="featureProgress(item)"
+                :tone="featureProgress(item) === 100 ? 'success' : 'accent'"
+                size="sm"
+              />
+              <div class="row-between wrap" style="gap: 4px">
+                <select
+                  class="select input-sm"
+                  style="max-width: 120px"
+                  :value="item.status"
+                  :aria-label="$t('projects.featureStatusAria', { title: item.title })"
+                  @change="moveTo(item, ($event.target as HTMLSelectElement).value)"
+                >
+                  <option v-for="col in columns" :key="col.key" :value="col.key">
+                    {{ col.label }}
+                  </option>
+                </select>
+                <div class="row" style="gap: 2px">
+                  <button
+                    v-if="item.status !== 'completed'"
+                    type="button"
+                    class="btn btn-ghost btn-icon btn-sm"
+                    :title="$t('projects.planToday')"
+                    :aria-label="$t('projects.planToday')"
+                    @click="planFeatureToday(project, item)"
+                  >
+                    <Icon name="calendar-plus" :size="13" />
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-icon btn-sm"
+                    :title="$t('projects.editFeature')"
+                    @click="openFeatureEdit(item)"
+                  >
+                    <Icon name="edit" :size="13" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </template>
+        </KanbanBoard>
       </div>
       <div v-else>
         <article v-for="feature in filteredFeatures(project)" :key="feature.id" class="feature-card">
@@ -497,6 +625,16 @@ onMounted(() => void load(true));
                   {{ featureStatusLabels[status] }}
                 </option>
               </select>
+              <button
+                v-if="feature.status !== 'completed'"
+                type="button"
+                class="btn btn-ghost btn-icon btn-sm"
+                :title="$t('projects.planToday')"
+                :aria-label="$t('projects.planToday')"
+                @click="planFeatureToday(project, feature)"
+              >
+                <Icon name="calendar-plus" :size="14" />
+              </button>
               <button type="button" class="btn btn-ghost btn-icon btn-sm" :title="$t('projects.editFeature')" @click="openFeatureEdit(feature)">
                 <Icon name="edit" :size="14" />
               </button>

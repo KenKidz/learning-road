@@ -287,6 +287,7 @@ export interface DashboardData {
     notReviewed: number;
     questionsTotal: number;
     reviewedThisWeek: number;
+    dueQuestionsCount: number;
   };
   jobs: {
     total: number;
@@ -354,7 +355,40 @@ export interface ExportPayload {
   };
 }
 
+export type ImportMode = 'replace' | 'merge';
+
+export interface ImportEntityDiff {
+  incoming: number;
+  toAdd: number;
+  toSkip: number;
+}
+
+export interface ImportPreviewResult {
+  exportedAt: string;
+  existing: {
+    courses: number;
+    tasks: number;
+    studySessions: number;
+    projects: number;
+    interviewTopics: number;
+    interviewChecklist: number;
+    jobApplications: number;
+    learningNotes: number;
+  };
+  merge: {
+    courses: ImportEntityDiff;
+    tasks: ImportEntityDiff;
+    studySessions: ImportEntityDiff;
+    projects: ImportEntityDiff;
+    interviewTopics: ImportEntityDiff;
+    interviewChecklist: ImportEntityDiff;
+    jobApplications: ImportEntityDiff;
+    learningNotes: ImportEntityDiff;
+  };
+}
+
 export interface ImportResult {
+  mode?: ImportMode;
   imported: {
     courses: number;
     tasks: number;
@@ -364,6 +398,93 @@ export interface ImportResult {
     jobApplications: number;
     learningNotes: number;
   };
+  skipped?: {
+    courses: number;
+    tasks: number;
+    studySessions: number;
+    projects: number;
+    interviewTopics: number;
+    jobApplications: number;
+    learningNotes: number;
+  };
+}
+
+export interface SearchResultItem {
+  id: number;
+  title: string;
+  subtitle?: string;
+  badge?: string;
+  route: string;
+}
+
+export interface SearchResponse {
+  query: string;
+  courses: SearchResultItem[];
+  tasks: SearchResultItem[];
+  notes: SearchResultItem[];
+  projects: SearchResultItem[];
+  interviewTopics: SearchResultItem[];
+  interviewQuestions: SearchResultItem[];
+  jobs: SearchResultItem[];
+}
+
+export interface AnalyticsHeatmapDay {
+  date: string;
+  minutes: number;
+  sessionsCount: number;
+  level: 0 | 1 | 2 | 3 | 4;
+}
+
+export interface AnalyticsWeeklyPoint {
+  weekStart: string;
+  minutes: number;
+  goalMinutes: number;
+  sessionsCount: number;
+  tasksCompleted: number;
+}
+
+export interface AnalyticsCategoryStat {
+  category: CourseCategory;
+  studyMinutes: number;
+  sessionsCount: number;
+}
+
+export interface AnalyticsCourseStat {
+  courseId: number;
+  title: string;
+  category: CourseCategory;
+  studyMinutes: number;
+  sessionsCount: number;
+  progress: number;
+}
+
+export interface AnalyticsTaskAccuracy {
+  completedWithEstimate: number;
+  totalEstimatedMinutes: number;
+  totalActualMinutes: number;
+  ratioPercent: number | null;
+}
+
+export interface AnalyticsPaceForecast {
+  activeWeeksSampled: number;
+  avgWeeklyMinutes: number;
+  remainingCourseHours: number;
+  estimatedWeeksToFinish: number | null;
+}
+
+export interface AnalyticsData {
+  days: number;
+  today: string;
+  dailyGoalMinutes: number;
+  weeklyGoalMinutes: number;
+  activeDaysCount: number;
+  longestStreakDays: number;
+  heatmap: AnalyticsHeatmapDay[];
+  weeklyTrend: AnalyticsWeeklyPoint[];
+  byCategory: AnalyticsCategoryStat[];
+  topCourses: AnalyticsCourseStat[];
+  taskAccuracy: AnalyticsTaskAccuracy;
+  paceForecast: AnalyticsPaceForecast;
 }
 
 export interface AiStatus {

@@ -7,6 +7,7 @@ import type {
   AiSuggestedTask,
   AiWeeklyCoachRequest,
   AiWeeklyCoachResponse,
+  AnalyticsData,
   AuthStatus,
   CourseDetail,
   CourseSummary,
@@ -14,6 +15,8 @@ import type {
   CoursesResponse,
   DashboardData,
   ExportPayload,
+  ImportMode,
+  ImportPreviewResult,
   ImportResult,
   InterviewChecklistItem,
   InterviewQuestion,
@@ -26,6 +29,7 @@ import type {
   Project,
   ProjectFeature,
   ProjectsResponse,
+  SearchResponse,
   SessionsResponse,
   StudySession,
   Task,
@@ -214,7 +218,13 @@ export const api = {
       stream: false,
     }),
 
-  importData: (payload: ExportPayload) => post<ImportResult>('/import', payload),
+  importData: (payload: ExportPayload, mode: ImportMode = 'replace') =>
+    post<ImportResult>(`/import?mode=${mode}`, payload),
+  previewImport: (payload: ExportPayload) =>
+    post<ImportPreviewResult>('/import/preview', payload),
+  search: (q: string, limit = 5) =>
+    get<SearchResponse>(`/search${queryString({ q, limit })}`),
+  analytics: (days = 180) => get<AnalyticsData>(`/analytics${queryString({ days })}`),
 };
 
 export async function streamAiWeeklyCoaching(

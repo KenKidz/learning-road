@@ -53,6 +53,15 @@ const paths: Record<string, string> = {
   copy: 'M9 9h11v11H9zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1',
   columns: 'M12 3v18M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z',
   calendar: 'M7 3v3M17 3v3M4 8h16M5 5h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM8 12h2M14 12h2M8 16h2M14 16h2',
+  pause: 'M6 4h4v16H6zM14 4h4v16h-4z',
+  stop: 'M5 5h14v14H5z',
+  timer: 'M10 2h4M12 14l3-3M12 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16z',
+  board: 'M3 4h5v16H3zM10 4h5v11h-5zM17 4h4v14h-4z',
+  table: 'M3 5h18v14H3zM3 10h18M9 10v9M15 10v9',
+  'calendar-plus': 'M7 3v3M17 3v3M4 8h16M5 5h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM12 12v6M9 15h6',
+  command: 'M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z',
+  flip: 'M3 12a9 9 0 0 1 15.5-6.3L21 8M21 3v5h-5M21 12a9 9 0 0 1-15.5 6.3L3 16M3 21v-5h5',
+  'bar-chart': 'M4 20h16M7 16v-5M12 16V7M17 16v-9',
 };
 </script>
 

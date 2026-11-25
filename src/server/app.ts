@@ -7,6 +7,7 @@ import { env } from './env';
 import { errorHandler, notFoundHandler } from './lib/errors';
 import { authRouter, sessionCookieName, verifySessionToken } from './routes/auth';
 import { aiRouter } from './routes/ai';
+import { analyticsRouter } from './routes/analytics';
 import { coursesRouter, topicsRouter } from './routes/courses';
 import { dashboardRouter } from './routes/dashboard';
 import { exportRouter } from './routes/export';
@@ -14,6 +15,7 @@ import { interviewRouter } from './routes/interview';
 import { jobsRouter } from './routes/jobs';
 import { notesRouter } from './routes/notes';
 import { featuresRouter, projectsRouter } from './routes/projects';
+import { searchRouter } from './routes/search';
 import { sessionsRouter } from './routes/sessions';
 import { settingsRouter } from './routes/settings';
 import { tasksRouter } from './routes/tasks';
@@ -42,6 +44,7 @@ export function createApp(db: AppDb): Express {
   app.use('/api', authGuard);
 
   app.use('/api/dashboard', dashboardRouter(db));
+  app.use('/api/analytics', analyticsRouter(db));
   app.use('/api/courses', coursesRouter(db));
   app.use('/api/topics', topicsRouter(db));
   app.use('/api/tasks', tasksRouter(db));
@@ -53,6 +56,7 @@ export function createApp(db: AppDb): Express {
   app.use('/api/notes', notesRouter(db));
   app.use('/api/settings', settingsRouter(db));
   app.use('/api/ai', aiRouter(db));
+  app.use('/api/search', searchRouter(db));
   app.use('/api', exportRouter(db));
 
   app.use('/api', notFoundHandler);

@@ -8,6 +8,7 @@ import {
   projectFeatures,
   projects,
 } from '../db/schema';
+import { isQuestionDue } from '../../shared/spaced-repetition';
 import type {
   CourseCategory,
   CourseStatus,
@@ -187,9 +188,15 @@ export async function buildDashboard(db: AppDb): Promise<DashboardData> {
     ? Math.round((completedFeatures / featureRows.length) * 100)
     : 0;
 
-  const [topicRows, questionCountRows, jobRows, noteCountRows] = await Promise.all([
+  const [topicRows, questionRows, jobRows, noteCountRows] = await Promise.all([
     db.select().from(interviewTopics),
-    db.select({ value: count() }).from(interviewQuestions),
+    db
+      .select({
+        id: interviewQuestions.id,
+        confidenceLevel: interviewQuestions.confidenceLevel,
+        lastReviewedAt: interviewQuestions.lastReviewedAt,
+      })
+      .from(interviewQuestions),
     db.select().from(jobApplications),
     db.select({ value: count() }).from(learningNotes),
   ]);
@@ -214,13 +221,15 @@ export async function buildDashboard(db: AppDb): Promise<DashboardData> {
     .sort((a, b) => (a.followUpAt ?? '').localeCompare(b.followUpAt ?? ''))
     .map(serializeJobApplication);
 
+  const now = new Date();
   const interviewCounts = {
     topicsTotal: topicRows.length,
     mastered: topicRows.filter((topic) => topic.status === 'mastered').length,
     reviewing: topicRows.filter((topic) => topic.status === 'reviewing').length,
     notReviewed: topicRows.filter((topic) => topic.status === 'not_reviewed').length,
-    questionsTotal: Number(questionCountRows[0]?.value ?? 0),
+    questionsTotal: questionRows.length,
     reviewedThisWeek,
+    dueQuestionsCount: questionRows.filter((question) => isQuestionDue(question, now)).length,
   };
 
   return {

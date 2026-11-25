@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useRoute } from 'vue-router';
 import type {
   AiInterviewReviewResponse,
   InterviewChecklistItem,
@@ -9,17 +10,21 @@ import type {
   InterviewTopic,
 } from '@shared/types';
 import { INTERVIEW_STATUSES } from '@shared/types';
+import { isQuestionDue } from '@shared/spaced-repetition';
 import { api, ApiError } from '../lib/api';
 import { formatDate, formatDateTime } from '../lib/format';
 import { interviewStatusLabels } from '../lib/labels';
 import { useToast } from '../composables/useToast';
 import { confirmAction } from '../composables/useConfirm';
+import { useUnsavedGuard } from '../composables/useUnsavedGuard';
 import PageHeader from '../components/PageHeader.vue';
 import StatCard from '../components/StatCard.vue';
 import EmptyState from '../components/EmptyState.vue';
 import BaseModal from '../components/BaseModal.vue';
+import InterviewPracticeMode from '../components/InterviewPracticeMode.vue';
 import Icon from '../components/Icon.vue';
 
+const route = useRoute();
 const toast = useToast();
 const { t } = useI18n();
 
@@ -29,7 +34,7 @@ const loading = ref(true);
 const error = ref('');
 const busy = ref(false);
 const formError = ref('');
-const tab = ref<'topics' | 'checklist'>('topics');
+const tab = ref<'topics' | 'practice' | 'checklist'>('topics');
 const showTopicModal = ref(false);
 const editingTopic = ref<InterviewTopic | null>(null);
 const newQuestion = reactive<Record<number, string>>({});
@@ -94,6 +99,12 @@ const reviewingCount = computed(
   () => topics.value.filter((topic) => topic.status === 'reviewing').length,
 );
 const checklistDone = computed(() => checklist.value.filter((item) => item.isCompleted).length);
+const dueQuestionCount = computed(() =>
+  topics.value.reduce(
+    (total, topic) => total + topic.questions.filter((q) => isQuestionDue(q)).length,
+    0,
+  ),
+);
 const checklistProgress = computed(() =>
   checklist.value.length ? Math.round((checklistDone.value / checklist.value.length) * 100) : 0,
 );
@@ -117,6 +128,12 @@ function isQuestionDirty(question: InterviewQuestion): boolean {
     (snap.confidenceLevel ?? null) !== (question.confidenceLevel ?? null)
   );
 }
+
+const hasDirtyQuestions = computed(() =>
+  topics.value.some((topic) => topic.questions.some((q) => isQuestionDirty(q))),
+);
+
+useUnsavedGuard(hasDirtyQuestions);
 
 function isTopicExpanded(topicId: number): boolean {
   return expandedTopicIds.value.has(topicId);
@@ -402,7 +419,36 @@ async function addFollowUpQuestion(topic: InterviewTopic, followUp: string) {
   }
 }
 
-onMounted(() => void load(true));
+async function applyRouteQuery() {
+  if (route.query.tab === 'practice') {
+    tab.value = 'practice';
+  } else if (route.query.tab === 'checklist') {
+    tab.value = 'checklist';
+  }
+  const queryTopicId =
+    typeof route.query.topicId === 'string' ? Number(route.query.topicId) : null;
+  if (queryTopicId && Number.isFinite(queryTopicId)) {
+    tab.value = 'topics';
+    expandedTopicIds.value = new Set([...expandedTopicIds.value, queryTopicId]);
+    await nextTick();
+    document.getElementById(`interview-topic-${queryTopicId}`)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  }
+}
+
+watch(
+  () => route.query,
+  () => {
+    void applyRouteQuery();
+  },
+);
+
+onMounted(async () => {
+  await load(true);
+  await applyRouteQuery();
+});
 </script>
 
 <template>
@@ -462,6 +508,12 @@ onMounted(() => void load(true));
       <div class="tabs">
         <button type="button" class="tab" :class="{ active: tab === 'topics' }" @click="tab = 'topics'">
           {{ $t('interview.topicsTab') }}
+        </button>
+        <button type="button" class="tab" :class="{ active: tab === 'practice' }" @click="tab = 'practice'">
+          {{ $t('interview.practiceTab') }}
+          <span v-if="dueQuestionCount > 0" class="badge badge-info tabular" style="margin-left: 4px">
+            {{ dueQuestionCount }}
+          </span>
         </button>
         <button type="button" class="tab" :class="{ active: tab === 'checklist' }" @click="tab = 'checklist'">
           {{ $t('interview.checklist') }}
@@ -546,7 +598,7 @@ onMounted(() => void load(true));
         </EmptyState>
       </div>
 
-      <section v-for="topic in filteredTopics" :key="topic.id" class="accordion-card">
+      <section v-for="topic in filteredTopics" :id="`interview-topic-${topic.id}`" :key="topic.id" class="accordion-card">
         <div class="accordion-head">
           <button
             type="button"
@@ -770,6 +822,10 @@ onMounted(() => void load(true));
           </form>
         </div>
       </section>
+    </div>
+
+    <div v-else-if="tab === 'practice'" class="mt-16">
+      <InterviewPracticeMode :topics="topics" @updated="load()" />
     </div>
 
     <div v-else class="stack mt-16">

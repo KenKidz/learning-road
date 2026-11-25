@@ -16,6 +16,7 @@ import { formatDateTime } from '../lib/format';
 import { noteRelatedTypeLabels } from '../lib/labels';
 import { useToast } from '../composables/useToast';
 import { confirmAction } from '../composables/useConfirm';
+import { useUnsavedGuard } from '../composables/useUnsavedGuard';
 import PageHeader from '../components/PageHeader.vue';
 import EmptyState from '../components/EmptyState.vue';
 import MarkdownView from '../components/MarkdownView.vue';
@@ -47,6 +48,68 @@ const editorMode = ref<'write' | 'split' | 'preview'>('write');
 const creating = ref(false);
 const editorTextarea = ref<HTMLTextAreaElement | null>(null);
 
+interface NoteDraft {
+  title: string;
+  relatedType: NoteRelatedType;
+  relatedId: string;
+  contentMarkdown: string;
+  savedAt: string;
+}
+
+const availableDraft = ref<NoteDraft | null>(null);
+const draftKey = computed(() => `lr-note-draft:${selectedId.value ?? 'new'}`);
+
+function readDraft(key: string): NoteDraft | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<NoteDraft>;
+    if (typeof parsed.title !== 'string' || typeof parsed.contentMarkdown !== 'string') return null;
+    return {
+      title: parsed.title,
+      relatedType: (parsed.relatedType as NoteRelatedType) ?? 'general',
+      relatedId: typeof parsed.relatedId === 'string' ? parsed.relatedId : '',
+      contentMarkdown: parsed.contentMarkdown,
+      savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function clearDraft(key = draftKey.value) {
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem(key);
+  }
+  availableDraft.value = null;
+}
+
+function checkDraftForCurrent() {
+  const draft = readDraft(draftKey.value);
+  if (
+    draft &&
+    (draft.title !== form.title ||
+      draft.contentMarkdown !== form.contentMarkdown ||
+      draft.relatedType !== form.relatedType ||
+      draft.relatedId !== form.relatedId)
+  ) {
+    availableDraft.value = draft;
+  } else {
+    availableDraft.value = null;
+  }
+}
+
+function restoreDraft() {
+  if (!availableDraft.value) return;
+  form.title = availableDraft.value.title;
+  form.relatedType = availableDraft.value.relatedType;
+  form.relatedId = availableDraft.value.relatedId;
+  form.contentMarkdown = availableDraft.value.contentMarkdown;
+  availableDraft.value = null;
+  toast.info(t('notes.draftRestored'));
+}
+
 const form = reactive({
   title: '',
   relatedType: 'general' as NoteRelatedType,
@@ -68,6 +131,29 @@ const isDirty = computed(
       form.relatedType !== savedSnapshot.relatedType ||
       form.relatedId !== savedSnapshot.relatedId ||
       form.contentMarkdown !== savedSnapshot.contentMarkdown),
+);
+
+useUnsavedGuard(isDirty);
+
+watch(
+  [() => form.title, () => form.relatedType, () => form.relatedId, () => form.contentMarkdown],
+  () => {
+    if (!showEditor.value || typeof window === 'undefined') return;
+    if (isDirty.value) {
+      const payload: NoteDraft = {
+        title: form.title,
+        relatedType: form.relatedType,
+        relatedId: form.relatedId,
+        contentMarkdown: form.contentMarkdown,
+        savedAt: new Date().toISOString(),
+      };
+      try {
+        window.localStorage.setItem(draftKey.value, JSON.stringify(payload));
+      } catch {
+        // Ignore storage quota errors
+      }
+    }
+  },
 );
 
 const filteredNotes = computed(() => {
@@ -182,15 +268,15 @@ async function load() {
     if (queryNoteId) {
       const note = notes.value.find((item) => item.id === queryNoteId);
       if (note) {
-        selectNote(note);
+        await selectNote(note, true);
         return;
       }
     }
     if (queryType) {
-      startNew(queryType, queryRelatedId);
+      await startNew(queryType, queryRelatedId, true);
       return;
     }
-    if (notes.value[0]) selectNote(notes.value[0]);
+    if (notes.value[0]) await selectNote(notes.value[0], true);
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : t('errors.notesLoad');
   } finally {
@@ -198,7 +284,18 @@ async function load() {
   }
 }
 
-function selectNote(note: LearningNote) {
+async function confirmSwitchIfDirty(): Promise<boolean> {
+  if (!isDirty.value) return true;
+  return confirmAction({
+    title: t('common.unsavedLeaveTitle'),
+    message: t('common.unsavedLeaveText'),
+    confirmLabel: t('common.discardAndLeave'),
+    danger: true,
+  });
+}
+
+async function selectNote(note: LearningNote, force = false) {
+  if (!force && selectedId.value !== note.id && !(await confirmSwitchIfDirty())) return;
   selectedId.value = note.id;
   creating.value = false;
   form.title = note.title;
@@ -207,9 +304,15 @@ function selectNote(note: LearningNote) {
   form.contentMarkdown = note.contentMarkdown;
   syncSnapshot();
   formError.value = '';
+  checkDraftForCurrent();
 }
 
-function startNew(type: NoteRelatedType = 'general', relatedId: number | null = null) {
+async function startNew(
+  type: NoteRelatedType = 'general',
+  relatedId: number | null = null,
+  force = false,
+) {
+  if (!force && !(await confirmSwitchIfDirty())) return;
   selectedId.value = null;
   creating.value = true;
   form.title = '';
@@ -223,6 +326,7 @@ function startNew(type: NoteRelatedType = 'general', relatedId: number | null = 
     if (options[0]) form.relatedId = String(options[0].id);
   }
   syncSnapshot();
+  checkDraftForCurrent();
 }
 
 async function save() {
@@ -251,10 +355,13 @@ async function save() {
       saved = await api.createNote(payload);
       toast.success(t('notes.created'));
     }
+    const previousKey = draftKey.value;
     await loadNotes();
+    clearDraft(previousKey);
     selectedId.value = saved.id;
     creating.value = false;
     syncSnapshot();
+    clearDraft();
     if (typeof route.query.noteId === 'string' || typeof route.query.relatedType === 'string') {
       await router.replace({ path: '/notes' });
     }
@@ -276,11 +383,12 @@ async function removeNote() {
   if (!confirmed) return;
   try {
     await api.deleteNote(selectedId.value);
+    clearDraft();
     toast.success(t('notes.deleted'));
     selectedId.value = null;
     creating.value = false;
     await loadNotes();
-    if (notes.value[0]) selectNote(notes.value[0]);
+    if (notes.value[0]) await selectNote(notes.value[0], true);
   } catch (err) {
     toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
   }
@@ -410,6 +518,19 @@ onMounted(load);
             </button>
             <button type="button" class="tab" :class="{ active: editorMode === 'preview' }" @click="editorMode = 'preview'">
               {{ $t('notes.previewTab') }}
+            </button>
+          </div>
+        </div>
+
+        <div v-if="availableDraft" class="alert alert-info mb-12">
+          <Icon name="info" :size="18" />
+          <div class="alert-body">{{ $t('notes.draftFound') }}</div>
+          <div class="row" style="gap: 6px">
+            <button type="button" class="btn btn-sm btn-primary" @click="restoreDraft">
+              {{ $t('notes.restoreDraft') }}
+            </button>
+            <button type="button" class="btn btn-sm" @click="clearDraft()">
+              {{ $t('notes.dismissDraft') }}
             </button>
           </div>
         </div>

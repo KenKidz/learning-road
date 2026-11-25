@@ -16,7 +16,12 @@ import {
   tasks,
   userSettings,
 } from '../db/schema';
-import type { ExportPayload, ImportResult } from '../../shared/types';
+import type {
+  ExportPayload,
+  ImportMode,
+  ImportPreviewResult,
+  ImportResult,
+} from '../../shared/types';
 import {
   COURSE_CATEGORIES,
   COURSE_STATUSES,
@@ -595,6 +600,575 @@ async function restore(db: AppDb, data: ImportData): Promise<ImportResult> {
   };
 }
 
+const norm = (value: string): string => value.trim().toLowerCase();
+
+function courseKey(title: string, category: string): string {
+  return `${norm(title)}::${category}`;
+}
+function courseTopicKey(courseId: number, title: string, kind: string): string {
+  return `${courseId}::${norm(title)}::${kind}`;
+}
+function projectFeatureKey(projectId: number, title: string): string {
+  return `${projectId}::${norm(title)}`;
+}
+function taskKey(
+  title: string,
+  plannedDate: string | null,
+  type: string,
+  courseId: number | null,
+  projectId: number | null,
+): string {
+  return `${norm(title)}::${plannedDate ?? ''}::${type}::${courseId ?? 0}::${projectId ?? 0}`;
+}
+function sessionKey(
+  startedAtIso: string,
+  durationMinutes: number,
+  courseId: number | null,
+  taskId: number | null,
+): string {
+  return `${new Date(startedAtIso).toISOString()}::${durationMinutes}::${courseId ?? 0}::${taskId ?? 0}`;
+}
+function interviewTopicKey(name: string, category: string): string {
+  return `${norm(name)}::${norm(category)}`;
+}
+function interviewQuestionKey(topicId: number, question: string): string {
+  return `${topicId}::${norm(question)}`;
+}
+function interviewChecklistKey(title: string, category: string): string {
+  return `${norm(title)}::${norm(category)}`;
+}
+function jobKey(company: string, position: string, appliedAt: string | null): string {
+  return `${norm(company)}::${norm(position)}::${appliedAt ?? ''}`;
+}
+function noteKey(title: string, relatedType: string, relatedId: number | null): string {
+  return `${norm(title)}::${relatedType}::${relatedId ?? 0}`;
+}
+
+function diffCount(incoming: number, toAdd: number) {
+  return { incoming, toAdd, toSkip: Math.max(0, incoming - toAdd) };
+}
+
+async function previewMerge(
+  db: AppDb,
+  payload: z.infer<typeof importSchema>,
+): Promise<ImportPreviewResult> {
+  const data = payload.data;
+  const [
+    existingCourses,
+    existingTasks,
+    existingSessions,
+    existingProjects,
+    existingTopics,
+    existingChecklist,
+    existingJobs,
+    existingNotes,
+  ] = await Promise.all([
+    db.select().from(courses),
+    db.select().from(tasks),
+    db.select().from(studySessions),
+    db.select().from(projects),
+    db.select().from(interviewTopics),
+    db.select().from(interviewChecklist),
+    db.select().from(jobApplications),
+    db.select().from(learningNotes),
+  ]);
+
+  const existingCourseByKey = new Map(
+    existingCourses.map((c) => [courseKey(c.title, c.category), c.id]),
+  );
+  const courseIdMap = new Map<number, number>();
+  let coursesToAdd = 0;
+  for (const c of data.courses) {
+    const matchId = existingCourseByKey.get(courseKey(c.title, c.category));
+    if (matchId !== undefined) courseIdMap.set(c.id, matchId);
+    else coursesToAdd += 1;
+  }
+
+  const existingProjectByKey = new Map(existingProjects.map((p) => [norm(p.name), p.id]));
+  const projectIdMap = new Map<number, number>();
+  let projectsToAdd = 0;
+  for (const p of data.projects) {
+    const matchId = existingProjectByKey.get(norm(p.name));
+    if (matchId !== undefined) projectIdMap.set(p.id, matchId);
+    else projectsToAdd += 1;
+  }
+
+  const existingTaskByKey = new Map(
+    existingTasks.map((t) => [
+      taskKey(t.title, t.plannedDate, t.type, t.relatedCourseId, t.relatedProjectId),
+      t.id,
+    ]),
+  );
+  const taskIdMap = new Map<number, number>();
+  let tasksToAdd = 0;
+  for (const t of data.tasks) {
+    const mappedCourseId =
+      t.relatedCourseId !== null ? courseIdMap.get(t.relatedCourseId) ?? null : null;
+    const mappedProjectId =
+      t.relatedProjectId !== null ? projectIdMap.get(t.relatedProjectId) ?? null : null;
+    const matchId = existingTaskByKey.get(
+      taskKey(t.title, t.plannedDate, t.type, mappedCourseId, mappedProjectId),
+    );
+    if (matchId !== undefined) taskIdMap.set(t.id, matchId);
+    else tasksToAdd += 1;
+  }
+
+  const existingSessionKeys = new Set(
+    existingSessions.map((s) =>
+      sessionKey(s.startedAt.toISOString(), s.durationMinutes, s.courseId, s.taskId),
+    ),
+  );
+  let sessionsToAdd = 0;
+  for (const s of data.studySessions) {
+    const mappedCourseId = s.courseId !== null ? courseIdMap.get(s.courseId) ?? null : null;
+    const mappedTaskId = s.taskId !== null ? taskIdMap.get(s.taskId) ?? null : null;
+    if (!existingSessionKeys.has(sessionKey(s.startedAt, s.durationMinutes, mappedCourseId, mappedTaskId))) {
+      sessionsToAdd += 1;
+    }
+  }
+
+  const existingTopicByKey = new Map(
+    existingTopics.map((t) => [interviewTopicKey(t.name, t.category), t.id]),
+  );
+  const interviewTopicIdMap = new Map<number, number>();
+  let topicsToAdd = 0;
+  for (const t of data.interviewTopics) {
+    const matchId = existingTopicByKey.get(interviewTopicKey(t.name, t.category));
+    if (matchId !== undefined) interviewTopicIdMap.set(t.id, matchId);
+    else topicsToAdd += 1;
+  }
+
+  const existingChecklistKeys = new Set(
+    existingChecklist.map((c) => interviewChecklistKey(c.title, c.category)),
+  );
+  const checklistToAdd = data.interviewChecklist.filter(
+    (c) => !existingChecklistKeys.has(interviewChecklistKey(c.title, c.category)),
+  ).length;
+
+  const existingJobKeys = new Set(
+    existingJobs.map((j) => jobKey(j.company, j.position, j.appliedAt)),
+  );
+  const jobsToAdd = data.jobApplications.filter(
+    (j) => !existingJobKeys.has(jobKey(j.company, j.position, j.appliedAt)),
+  ).length;
+
+  const existingNoteKeys = new Set(
+    existingNotes.map((n) => noteKey(n.title, n.relatedType, n.relatedId)),
+  );
+  let notesToAdd = 0;
+  for (const n of data.learningNotes) {
+    let mappedRelatedId: number | null = null;
+    if (n.relatedType === 'course' && n.relatedId !== null) {
+      mappedRelatedId = courseIdMap.get(n.relatedId) ?? null;
+    } else if (n.relatedType === 'task' && n.relatedId !== null) {
+      mappedRelatedId = taskIdMap.get(n.relatedId) ?? null;
+    } else if (n.relatedType === 'project' && n.relatedId !== null) {
+      mappedRelatedId = projectIdMap.get(n.relatedId) ?? null;
+    } else if (n.relatedType === 'interview_topic' && n.relatedId !== null) {
+      mappedRelatedId = interviewTopicIdMap.get(n.relatedId) ?? null;
+    }
+    if (!existingNoteKeys.has(noteKey(n.title, n.relatedType, mappedRelatedId))) {
+      notesToAdd += 1;
+    }
+  }
+
+  return {
+    exportedAt: payload.exportedAt,
+    existing: {
+      courses: existingCourses.length,
+      tasks: existingTasks.length,
+      studySessions: existingSessions.length,
+      projects: existingProjects.length,
+      interviewTopics: existingTopics.length,
+      interviewChecklist: existingChecklist.length,
+      jobApplications: existingJobs.length,
+      learningNotes: existingNotes.length,
+    },
+    merge: {
+      courses: diffCount(data.courses.length, coursesToAdd),
+      tasks: diffCount(data.tasks.length, tasksToAdd),
+      studySessions: diffCount(data.studySessions.length, sessionsToAdd),
+      projects: diffCount(data.projects.length, projectsToAdd),
+      interviewTopics: diffCount(data.interviewTopics.length, topicsToAdd),
+      interviewChecklist: diffCount(data.interviewChecklist.length, checklistToAdd),
+      jobApplications: diffCount(data.jobApplications.length, jobsToAdd),
+      learningNotes: diffCount(data.learningNotes.length, notesToAdd),
+    },
+  };
+}
+
+async function mergeRestore(db: AppDb, data: ImportData): Promise<ImportResult> {
+  const imported = {
+    courses: 0,
+    tasks: 0,
+    studySessions: 0,
+    projects: 0,
+    interviewTopics: 0,
+    jobApplications: 0,
+    learningNotes: 0,
+  };
+  const skipped = {
+    courses: 0,
+    tasks: 0,
+    studySessions: 0,
+    projects: 0,
+    interviewTopics: 0,
+    jobApplications: 0,
+    learningNotes: 0,
+  };
+
+  await db.transaction(async (tx) => {
+    const [
+      existingCourses,
+      existingCourseTopics,
+      existingProjects,
+      existingFeatures,
+      existingTasks,
+      existingSessions,
+      existingTopics,
+      existingQuestions,
+      existingChecklist,
+      existingJobs,
+      existingNotes,
+    ] = await Promise.all([
+      tx.select().from(courses),
+      tx.select().from(courseTopics),
+      tx.select().from(projects),
+      tx.select().from(projectFeatures),
+      tx.select().from(tasks),
+      tx.select().from(studySessions),
+      tx.select().from(interviewTopics),
+      tx.select().from(interviewQuestions),
+      tx.select().from(interviewChecklist),
+      tx.select().from(jobApplications),
+      tx.select().from(learningNotes),
+    ]);
+
+    const courseByKey = new Map(existingCourses.map((c) => [courseKey(c.title, c.category), c.id]));
+    const existingTopicKeys = new Set(
+      existingCourseTopics.map((t) => courseTopicKey(t.courseId, t.title, t.kind)),
+    );
+    const courseIdMap = new Map<number, number>();
+
+    for (const course of data.courses) {
+      const key = courseKey(course.title, course.category);
+      let targetCourseId = courseByKey.get(key);
+      if (targetCourseId === undefined) {
+        const [inserted] = await tx
+          .insert(courses)
+          .values({
+            title: course.title,
+            category: course.category,
+            priority: course.priority,
+            durationHours: course.durationHours,
+            description: course.description,
+            objectives: course.objectives,
+            status: course.status,
+            progressManual: course.progressManual,
+            weight: course.weight,
+            sortOrder: course.sortOrder,
+            isSeeded: course.isSeeded,
+            link: course.link,
+            notes: course.notes,
+            startedAt: toDate(course.startedAt),
+            completedAt: toDate(course.completedAt),
+            createdAt: new Date(course.createdAt),
+            updatedAt: new Date(course.updatedAt),
+          })
+          .returning({ id: courses.id });
+        targetCourseId = inserted!.id;
+        courseByKey.set(key, targetCourseId);
+        imported.courses += 1;
+      } else {
+        skipped.courses += 1;
+      }
+      courseIdMap.set(course.id, targetCourseId);
+
+      for (const topic of course.topics) {
+        const tKey = courseTopicKey(targetCourseId, topic.title, topic.kind);
+        if (!existingTopicKeys.has(tKey)) {
+          await tx.insert(courseTopics).values({
+            courseId: targetCourseId,
+            title: topic.title,
+            description: topic.description,
+            kind: topic.kind,
+            isCompleted: topic.isCompleted,
+            sortOrder: topic.sortOrder,
+          });
+          existingTopicKeys.add(tKey);
+        }
+      }
+    }
+
+    const projectByKey = new Map(existingProjects.map((p) => [norm(p.name), p.id]));
+    const existingFeatureKeys = new Set(
+      existingFeatures.map((f) => projectFeatureKey(f.projectId, f.title)),
+    );
+    const projectIdMap = new Map<number, number>();
+
+    for (const project of data.projects) {
+      const key = norm(project.name);
+      let targetProjectId = projectByKey.get(key);
+      if (targetProjectId === undefined) {
+        const [inserted] = await tx
+          .insert(projects)
+          .values({
+            name: project.name,
+            description: project.description,
+            status: project.status,
+            startedAt: toDate(project.startedAt),
+            targetDate: project.targetDate,
+            completedAt: toDate(project.completedAt),
+            isSeeded: project.isSeeded,
+            sortOrder: project.sortOrder,
+            createdAt: new Date(project.createdAt),
+            updatedAt: new Date(project.updatedAt),
+          })
+          .returning({ id: projects.id });
+        targetProjectId = inserted!.id;
+        projectByKey.set(key, targetProjectId);
+        imported.projects += 1;
+      } else {
+        skipped.projects += 1;
+      }
+      projectIdMap.set(project.id, targetProjectId);
+
+      for (const feature of project.features) {
+        const fKey = projectFeatureKey(targetProjectId, feature.title);
+        if (!existingFeatureKeys.has(fKey)) {
+          await tx.insert(projectFeatures).values({
+            projectId: targetProjectId,
+            title: feature.title,
+            description: feature.description,
+            status: feature.status,
+            priority: feature.priority,
+            checklist: feature.checklist,
+            targetDate: feature.targetDate,
+            notes: feature.notes,
+            sortOrder: feature.sortOrder,
+            createdAt: new Date(feature.createdAt),
+            updatedAt: new Date(feature.updatedAt),
+          });
+          existingFeatureKeys.add(fKey);
+        }
+      }
+    }
+
+    const taskByKey = new Map(
+      existingTasks.map((t) => [
+        taskKey(t.title, t.plannedDate, t.type, t.relatedCourseId, t.relatedProjectId),
+        t.id,
+      ]),
+    );
+    const taskIdMap = new Map<number, number>();
+
+    for (const task of data.tasks) {
+      const mappedCourseId =
+        task.relatedCourseId !== null ? courseIdMap.get(task.relatedCourseId) ?? null : null;
+      const mappedProjectId =
+        task.relatedProjectId !== null ? projectIdMap.get(task.relatedProjectId) ?? null : null;
+      const key = taskKey(task.title, task.plannedDate, task.type, mappedCourseId, mappedProjectId);
+      let targetTaskId = taskByKey.get(key);
+      if (targetTaskId === undefined) {
+        const [inserted] = await tx
+          .insert(tasks)
+          .values({
+            title: task.title,
+            description: task.description,
+            type: task.type,
+            relatedCourseId: mappedCourseId,
+            relatedProjectId: mappedProjectId,
+            plannedDate: task.plannedDate,
+            dueDate: task.dueDate,
+            estimatedMinutes: task.estimatedMinutes,
+            actualMinutes: task.actualMinutes,
+            status: task.status,
+            priority: task.priority,
+            completedAt: toDate(task.completedAt),
+            createdAt: new Date(task.createdAt),
+            updatedAt: new Date(task.updatedAt),
+          })
+          .returning({ id: tasks.id });
+        targetTaskId = inserted!.id;
+        taskByKey.set(key, targetTaskId);
+        imported.tasks += 1;
+      } else {
+        skipped.tasks += 1;
+      }
+      taskIdMap.set(task.id, targetTaskId);
+    }
+
+    const existingSessionKeys = new Set(
+      existingSessions.map((s) =>
+        sessionKey(s.startedAt.toISOString(), s.durationMinutes, s.courseId, s.taskId),
+      ),
+    );
+    for (const session of data.studySessions) {
+      const mappedCourseId =
+        session.courseId !== null ? courseIdMap.get(session.courseId) ?? null : null;
+      const mappedTaskId = session.taskId !== null ? taskIdMap.get(session.taskId) ?? null : null;
+      const sKey = sessionKey(
+        session.startedAt,
+        session.durationMinutes,
+        mappedCourseId,
+        mappedTaskId,
+      );
+      if (!existingSessionKeys.has(sKey)) {
+        await tx.insert(studySessions).values({
+          courseId: mappedCourseId,
+          taskId: mappedTaskId,
+          startedAt: new Date(session.startedAt),
+          endedAt: toDate(session.endedAt),
+          durationMinutes: session.durationMinutes,
+          notes: session.notes,
+          createdAt: new Date(session.createdAt),
+        });
+        existingSessionKeys.add(sKey);
+        imported.studySessions += 1;
+      } else {
+        skipped.studySessions += 1;
+      }
+    }
+
+    const topicByKey = new Map(
+      existingTopics.map((t) => [interviewTopicKey(t.name, t.category), t.id]),
+    );
+    const existingQuestionKeys = new Set(
+      existingQuestions.map((q) => interviewQuestionKey(q.topicId, q.question)),
+    );
+    const interviewTopicIdMap = new Map<number, number>();
+
+    for (const topic of data.interviewTopics) {
+      const key = interviewTopicKey(topic.name, topic.category);
+      let targetTopicId = topicByKey.get(key);
+      if (targetTopicId === undefined) {
+        const [inserted] = await tx
+          .insert(interviewTopics)
+          .values({
+            name: topic.name,
+            category: topic.category,
+            status: topic.status,
+            lastReviewedAt: toDate(topic.lastReviewedAt),
+            notes: topic.notes,
+            sortOrder: topic.sortOrder,
+            isSeeded: topic.isSeeded,
+            createdAt: new Date(topic.createdAt),
+            updatedAt: new Date(topic.updatedAt),
+          })
+          .returning({ id: interviewTopics.id });
+        targetTopicId = inserted!.id;
+        topicByKey.set(key, targetTopicId);
+        imported.interviewTopics += 1;
+      } else {
+        skipped.interviewTopics += 1;
+      }
+      interviewTopicIdMap.set(topic.id, targetTopicId);
+
+      for (const question of topic.questions) {
+        const qKey = interviewQuestionKey(targetTopicId, question.question);
+        if (!existingQuestionKeys.has(qKey)) {
+          await tx.insert(interviewQuestions).values({
+            topicId: targetTopicId,
+            question: question.question,
+            answer: question.answer,
+            confidenceLevel: question.confidenceLevel,
+            lastReviewedAt: toDate(question.lastReviewedAt),
+            createdAt: new Date(question.createdAt),
+            updatedAt: new Date(question.updatedAt),
+          });
+          existingQuestionKeys.add(qKey);
+        }
+      }
+    }
+
+    const existingChecklistKeys = new Set(
+      existingChecklist.map((c) => interviewChecklistKey(c.title, c.category)),
+    );
+    for (const item of data.interviewChecklist) {
+      const cKey = interviewChecklistKey(item.title, item.category);
+      if (!existingChecklistKeys.has(cKey)) {
+        await tx.insert(interviewChecklist).values({
+          title: item.title,
+          category: item.category,
+          isCompleted: item.isCompleted,
+          notes: item.notes,
+          sortOrder: item.sortOrder,
+          isSeeded: item.isSeeded,
+          createdAt: new Date(item.createdAt),
+        });
+        existingChecklistKeys.add(cKey);
+      }
+    }
+
+    const existingJobKeys = new Set(
+      existingJobs.map((j) => jobKey(j.company, j.position, j.appliedAt)),
+    );
+    for (const job of data.jobApplications) {
+      const jKey = jobKey(job.company, job.position, job.appliedAt);
+      if (!existingJobKeys.has(jKey)) {
+        await tx.insert(jobApplications).values({
+          company: job.company,
+          position: job.position,
+          jobUrl: job.jobUrl,
+          appliedAt: job.appliedAt,
+          status: job.status,
+          contactPerson: job.contactPerson,
+          followUpAt: job.followUpAt,
+          notes: job.notes,
+          cvVersion: job.cvVersion,
+          createdAt: new Date(job.createdAt),
+          updatedAt: new Date(job.updatedAt),
+        });
+        existingJobKeys.add(jKey);
+        imported.jobApplications += 1;
+      } else {
+        skipped.jobApplications += 1;
+      }
+    }
+
+    const existingNoteKeys = new Set(
+      existingNotes.map((n) => noteKey(n.title, n.relatedType, n.relatedId)),
+    );
+    for (const note of data.learningNotes) {
+      let mappedRelatedType = note.relatedType;
+      let mappedRelatedId: number | null = null;
+      if (note.relatedType === 'course' && note.relatedId !== null) {
+        mappedRelatedId = courseIdMap.get(note.relatedId) ?? null;
+      } else if (note.relatedType === 'task' && note.relatedId !== null) {
+        mappedRelatedId = taskIdMap.get(note.relatedId) ?? null;
+      } else if (note.relatedType === 'project' && note.relatedId !== null) {
+        mappedRelatedId = projectIdMap.get(note.relatedId) ?? null;
+      } else if (note.relatedType === 'interview_topic' && note.relatedId !== null) {
+        mappedRelatedId = interviewTopicIdMap.get(note.relatedId) ?? null;
+      }
+      if (mappedRelatedType !== 'general' && mappedRelatedId === null) {
+        mappedRelatedType = 'general';
+      }
+      const nKey = noteKey(note.title, mappedRelatedType, mappedRelatedId);
+      if (!existingNoteKeys.has(nKey)) {
+        await tx.insert(learningNotes).values({
+          title: note.title,
+          contentMarkdown: note.contentMarkdown,
+          relatedType: mappedRelatedType,
+          relatedId: mappedRelatedId,
+          createdAt: new Date(note.createdAt),
+          updatedAt: new Date(note.updatedAt),
+        });
+        existingNoteKeys.add(nKey);
+        imported.learningNotes += 1;
+      } else {
+        skipped.learningNotes += 1;
+      }
+    }
+  });
+
+  return {
+    mode: 'merge',
+    imported,
+    skipped,
+  };
+}
+
 export function exportRouter(db: AppDb): Router {
   const router = Router();
 
@@ -611,12 +1185,27 @@ export function exportRouter(db: AppDb): Router {
   );
 
   router.post(
-    '/import',
+    '/import/preview',
     asyncHandler(async (req, res) => {
       const input = parseInput(importSchema, req.body);
+      const preview = await previewMerge(db, input);
+      res.json(preview);
+    }),
+  );
+
+  router.post(
+    '/import',
+    asyncHandler(async (req, res) => {
+      const rawMode = typeof req.query.mode === 'string' ? req.query.mode : 'replace';
+      if (rawMode !== 'replace' && rawMode !== 'merge') {
+        throw new AppError(400, 'INVALID_QUERY', 'Chế độ import phải là replace hoặc merge.');
+      }
+      const mode: ImportMode = rawMode;
+      const input = parseInput(importSchema, req.body);
       try {
-        const result = await restore(db, input.data);
-        res.json(result);
+        const result =
+          mode === 'merge' ? await mergeRestore(db, input.data) : await restore(db, input.data);
+        res.json({ mode, ...result });
       } catch (error) {
         const code = (error as { code?: string }).code;
         if (code === '23503' || code === '23505' || code === '22P02') {
