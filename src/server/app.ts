@@ -23,7 +23,7 @@ import { tasksRouter } from './routes/tasks';
 export function createApp(db: AppDb): Express {
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', 'loopback');
+  app.set('trust proxy', env.trustProxy);
   app.use(express.json({ limit: '10mb' }));
   app.use(cookieParser());
 

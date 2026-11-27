@@ -12,19 +12,40 @@ function optionalSecret(): string {
   return generated;
 }
 
+export function resolveTrustProxy(
+  raw: string | undefined,
+  nodeEnv: string,
+): boolean | number | string {
+  const trimmed = raw?.trim();
+  if (!trimmed) {
+    return nodeEnv === 'production' ? 1 : 'loopback';
+  }
+  const lower = trimmed.toLowerCase();
+  if (lower === 'true') return true;
+  if (lower === 'false') return false;
+  if (/^\d+$/.test(trimmed)) return Number(trimmed);
+  return trimmed;
+}
+
+const nodeEnv = process.env.NODE_ENV ?? 'development';
 const appPassword = process.env.APP_PASSWORD?.trim() ?? '';
 const fallbackAiSessionId = `ses_${crypto.randomBytes(12).toString('hex')}`;
 
 export const env = {
   port: Number(process.env.PORT ?? 3000),
-  nodeEnv: process.env.NODE_ENV ?? 'development',
+  nodeEnv,
+  databaseUrl: process.env.DATABASE_URL?.trim() ?? '',
   databaseDir: path.resolve(process.env.DATABASE_DIR ?? './data/pg'),
   migrationsFolder: path.resolve(process.env.MIGRATIONS_DIR ?? './drizzle'),
   webDistDir: path.resolve(process.env.WEB_DIST_DIR ?? './dist/web'),
+  trustProxy: resolveTrustProxy(process.env.TRUST_PROXY, nodeEnv),
   appPassword,
   sessionSecret: appPassword ? optionalSecret() : crypto.randomBytes(32).toString('hex'),
   get isProduction(): boolean {
     return this.nodeEnv === 'production';
+  },
+  get useExternalPostgres(): boolean {
+    return this.databaseUrl.length > 0;
   },
   get authEnabled(): boolean {
     return this.appPassword.length > 0;

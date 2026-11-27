@@ -789,7 +789,8 @@ const vi = {
     importedSummary:
       'Đã import: {courses} khóa học · {tasks} task · {sessions} study session · {jobs} hồ sơ ứng tuyển · {notes} ghi chú.',
     securityTitle: 'Bảo mật & dữ liệu',
-    securityHint: 'App lưu dữ liệu trong PostgreSQL nhúng (PGlite) trên máy chạy server.',
+    securityHint:
+      'App lưu dữ liệu trong PostgreSQL (DATABASE_URL trên production hoặc PGlite nhúng khi chạy local).',
     passwordProtection: 'Truy cập bằng mật khẩu',
     authOn: 'Đang bật (APP_PASSWORD)',
     authOff: 'Chưa bật (local-only)',

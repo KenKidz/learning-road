@@ -783,7 +783,8 @@ const en: Messages = {
     importedSummary:
       'Imported: {courses} courses · {tasks} tasks · {sessions} study sessions · {jobs} applications · {notes} notes.',
     securityTitle: 'Security & data',
-    securityHint: 'The app stores data in embedded PostgreSQL (PGlite) on the server machine.',
+    securityHint:
+      'The app stores data in PostgreSQL (external DATABASE_URL in production or embedded PGlite locally).',
     passwordProtection: 'Password protection',
     authOn: 'Enabled (APP_PASSWORD)',
     authOff: 'Disabled (local-only)',

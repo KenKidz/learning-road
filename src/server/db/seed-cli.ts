@@ -1,4 +1,4 @@
-import { getDb } from './client';
+import { closeDb, getDb } from './client';
 import { seedDatabase } from './seed';
 
 const db = await getDb();
@@ -8,4 +8,5 @@ if (result.seeded) {
 } else {
   console.log(`[seed] Skipped: ${result.reason}`);
 }
+await closeDb();
 process.exit(0);

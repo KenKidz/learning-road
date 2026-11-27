@@ -7,4 +7,8 @@ data
 .env.local
 *.log
 coverage
+e2e
+playwright-report
+test-results
+render.yaml
 learning-roadmap-and-ai-agent-brief.md
