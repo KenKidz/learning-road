@@ -642,6 +642,18 @@ const vi = {
     searchPlaceholder: 'Tìm chủ đề hoặc câu hỏi…',
     allCategories: 'Tất cả danh mục',
     allStatuses: 'Mọi trạng thái',
+    saved: 'Đã lưu',
+    saving: 'Đang lưu…',
+    saveShortcutHint: 'Ctrl+Enter để lưu',
+    notesLabel: 'Ghi chú & chiến lược',
+    showNotes: 'Xem đầy đủ',
+    hideNotes: 'Thu gọn',
+    collapseQuestion: 'Thu gọn câu hỏi',
+    expandQuestion: 'Mở rộng câu hỏi',
+    wordSpeakStats: '{words} từ · ~{seconds}s nói',
+    wordCountOnly: '{words} từ',
+    ratedCount: '{rated}/{total} đã đánh giá',
+    noAnswerYet: 'Chưa có câu trả lời',
   },
   jobs: {
     subtitle:

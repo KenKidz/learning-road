@@ -19,7 +19,7 @@ import {
   seedProject,
 } from './seed-data';
 
-export const SEED_VERSION = '2';
+export const SEED_VERSION = '4';
 const SEED_KEY = 'seed_version';
 
 export interface SeedResult {
@@ -284,6 +284,22 @@ async function upsertSeedInterviews(tx: Tx): Promise<void> {
         isSeeded: true,
       });
       itemOrder += 10;
+    }
+  } else {
+    const existingTitles = new Set(existingChecklist.map((item) => item.title));
+    let itemOrder =
+      existingChecklist.reduce((max, item) => Math.max(max, item.sortOrder), 0) + 10;
+    for (const item of seedInterviewChecklist) {
+      if (!existingTitles.has(item.title)) {
+        await tx.insert(interviewChecklist).values({
+          title: item.title,
+          category: item.category,
+          isCompleted: false,
+          sortOrder: itemOrder,
+          isSeeded: true,
+        });
+        itemOrder += 10;
+      }
     }
   }
 }

@@ -997,6 +997,10 @@ export const seedInterviewTopics: SeedInterviewTopicItem[] = [
         answer: `- SSR truyền thống: Server render thành chuỗi HTML để hiển thị nhanh lần đầu, nhưng trình duyệt VẪN phải tải toàn bộ JavaScript bundle của các component đó về để thực hiện Hydration.
 - React Server Components (RSC): Chỉ chạy duy nhất trên server, có thể truy cập trực tiếp Database/FileSystem và mã nguồn cùng các thư viện nặng của RSC (như trình parse Markdown, syntax highlighter) có kích thước JS bundle gửi xuống trình duyệt bằng 0. Chỉ những phần cần tương tác (onClick, useState, useEffect) mới đánh dấu 'use client'.`,
       },
+      {
+        question: 'What is the Virtual DOM?',
+        answer: `The Virtual DOM is a lightweight representation of the real DOM. Frameworks use it to calculate and apply necessary UI updates.`,
+      },
     ],
   },
   {
@@ -1209,6 +1213,350 @@ export const seedInterviewTopics: SeedInterviewTopicItem[] = [
       },
     ],
   },
+  {
+    name: 'Redis & Kafka',
+    category: 'Backend',
+    notes:
+      'Câu hỏi kỹ thuật ngắn về Caching và Event-Driven Systems trong CV. Lưu ý: phân biệt rõ Redis cache vs Pub/Sub; với Kafka nắm chắc producer, consumer, topic và event flow; với dự án WorkPulse luôn nêu rõ là personal project.',
+    questions: [
+      {
+        question: 'What is Redis?',
+        answer: `Redis is an in-memory data store commonly used for caching, session management, and messaging.`,
+      },
+      {
+        question: 'What is Kafka?',
+        answer: `Kafka is a distributed event streaming platform used to publish, store, and consume events.`,
+      },
+      {
+        question: 'What is the difference between Kafka and Redis Pub/Sub?',
+        answer: `Kafka retains events and supports replay, while standard Redis Pub/Sub delivers messages to active subscribers without message persistence.`,
+      },
+    ],
+  },
+  {
+    name: 'Fintech & Payment Systems',
+    category: 'Fintech',
+    notes:
+      'Nhóm câu hỏi tạo lợi thế cho lĩnh vực Fintech (payment, e-wallet, KYC, trading — rất sát với sản phẩm của Jits Innovation Labs). Lưu ý: kiến thức ACID / Database Transaction đã được phủ trong chủ đề Database.',
+    questions: [
+      {
+        question: 'How would you prevent duplicate payment transactions?',
+        answer: `On the frontend, I would disable the payment button while a request is being processed.
+
+However, frontend validation alone is not enough.
+
+The backend should implement idempotency using a unique idempotency key for each payment operation.
+
+This ensures that repeated requests do not create duplicate transactions.
+
+We should also handle network timeouts carefully because a transaction may have succeeded even if the frontend did not receive the response.`,
+      },
+      {
+        question: 'What would you do if a payment request timed out?',
+        answer: `I would not immediately assume that the payment failed.
+
+The backend may have already processed the transaction, but the frontend may not have received the response.
+
+I would check the transaction status through the backend using its transaction ID or another appropriate identifier.
+
+The frontend should display a pending or unknown status until the final result is confirmed.
+
+I would avoid sending the payment request again without checking its status first.`,
+      },
+      {
+        question: 'What security considerations are important in a financial application?',
+        answer: `Security is very important in financial applications because they handle sensitive personal and financial information.
+
+Some important considerations include secure authentication, proper authorization, input validation, protection against XSS and CSRF, and secure communication over HTTPS.
+
+We should also avoid exposing sensitive information in frontend logs or storing unnecessary confidential data on the client side.
+
+From the frontend perspective, I believe we should follow the security requirements provided by the backend and ensure that sensitive operations are handled correctly.`,
+      },
+      {
+        question: 'What is gamification?',
+        answer: `Gamification is the process of applying game-like elements to non-game applications to increase user engagement and motivation.
+
+Common examples include points, badges, leaderboards, challenges, missions, and rewards.
+
+For example, in a banking application, users may receive points or rewards for completing certain activities.
+
+The goal is to encourage users to interact more frequently with the product and improve their overall experience.`,
+      },
+      {
+        question: 'What technical challenges can you face when developing a gamification application?',
+        answer: `Some common challenges include handling dynamic user interactions, managing application state, displaying real-time scores or rankings, and ensuring a smooth user experience.
+
+From the frontend perspective, I focus on component reusability, responsive design, and efficient state management.
+
+For features involving points or rewards, data consistency is also important. The frontend should always display information based on the confirmed data from the backend rather than calculating important reward values independently.
+
+I believe the key is to balance an engaging user experience with reliable business logic.
+
+---
+Lưu ý: Đây là câu trả lời theo hướng mô tả kinh nghiệm và cách tiếp cận kỹ thuật. Chỉ nên nói rằng mình đã trực tiếp triển khai một tính năng cụ thể nếu thực sự đã làm tính năng đó.`,
+      },
+    ],
+  },
+  {
+    name: 'AI Interview: Intro, Experience & Fit',
+    category: 'AI Interview',
+    notes: `Định vị: Frontend-focused Fullstack Developer (Vue 3, Nuxt 3, React, TypeScript + kinh nghiệm thực tế Python/FastAPI, PostgreSQL, Redis).
+Cách trả lời: 40–60 giây/câu (60–90 giây cho câu dự án), luôn gắn ví dụ thực tế (CFD WebTrade, Client Portal, Trading Terminal), trung thực về phạm vi đã làm và nêu rõ WorkPulse là personal project.
+Câu nối tiếng Anh hữu ích:
+- Cần thời gian suy nghĩ: "Let me think about that for a moment."
+- Đưa ví dụ: "Let me give you a practical example from my previous project."
+- Kinh nghiệm một phần: "I have some practical experience with this, but I am still improving my knowledge."
+- Chưa làm production: "I haven't implemented this in a production environment yet, but I understand the basic concepts."`,
+    questions: [
+      {
+        question: 'Tell me about yourself.',
+        answer: `Hello, my name is Nguyen Khoi Nguyen.
+
+I am a Software Developer with nearly four years of experience in web development.
+
+My main strength is frontend development, especially Vue 3, Nuxt 3, React, and TypeScript.
+
+In my previous projects, I worked on different web applications, including a community management platform and a CFD trading platform.
+
+In my most recent project, I worked on a Client Portal using Nuxt 3 and a Trading Terminal using React. My responsibilities included authentication, account management, wallet and payment features, KYC verification, API integration, and real-time data handling.
+
+Besides frontend development, I also have experience working with Python, FastAPI, PostgreSQL, Redis, and other backend-related technologies.
+
+I am looking for an opportunity to improve my fullstack skills and contribute to real-world products, especially in the fintech domain.
+
+Thank you for giving me this opportunity.
+
+---
+Ghi chú: Giới thiệu kinh nghiệm, công nghệ chính, dự án gần nhất và định hướng nghề nghiệp. Nói tự nhiên trong ~1 phút, không đọc quá nhanh.`,
+      },
+      {
+        question: 'Can you describe your current or most recent work experience?',
+        answer: `In my most recent role at Triplayz Technology Solutions, I worked as a Software Developer.
+
+I was involved in developing a CFD WebTrade platform, which was an integrated trading platform connected to MetaTrader 5.
+
+The project had two main frontend applications.
+
+The first application was a Client Portal built with Nuxt 3 and Vue 3. It included authentication, trading account management, wallet, payment funding, KYC, and reporting features.
+
+The second application was a Trading Terminal built with React and TypeScript. It provided interactive charts, watchlists, order execution, live positions, and trading history.
+
+I also worked with REST APIs, Socket.IO, and cross-application communication using postMessage.
+
+This experience helped me improve my skills in frontend architecture, API integration, and real-time web applications.
+
+---
+Điểm cần nhấn mạnh: Không chỉ làm UI mà còn hiểu luồng nghiệp vụ và cách các thành phần của hệ thống phối hợp.`,
+      },
+      {
+        question: 'What was your main responsibility in the CFD WebTrade project?',
+        answer: `My main responsibility was frontend development.
+
+I worked mainly with Nuxt 3, Vue 3, React, and TypeScript.
+
+On the Client Portal, I developed and maintained features such as authentication, account management, wallet, payment funding, and KYC verification.
+
+On the Trading Terminal, I worked with interactive components, charts, watchlists, and real-time trading data.
+
+I also collaborated with backend developers to integrate APIs and handle data synchronization between the frontend applications.
+
+Besides development, I participated in debugging and testing to make sure the features worked correctly.
+
+---
+Ghi chú: Nhớ rõ các module cụ thể đã làm để chứng minh kinh nghiệm thực chiến thay vì chỉ kể tên công nghệ.`,
+      },
+      {
+        question: 'Why are you interested in Jits Innovation Labs?',
+        answer: `I am interested in Jits Innovation Labs because the company focuses on fintech products such as online payment systems, e-wallets, loyalty platforms, mobile banking, and digital lending.
+
+I find these domains interesting because they involve complex business logic, security, performance, and user experience.
+
+In my previous project, I had experience working with wallet management, payment funding, authentication, and KYC features.
+
+I believe this experience is relevant to the company's products.
+
+I also want to improve my fullstack skills and have the opportunity to work on long-term products with a professional development team.`,
+      },
+      {
+        question: 'What is your experience with backend development?',
+        answer: `My strongest area is frontend development, but I also have practical experience working with backend technologies.
+
+I have worked with Python and FastAPI, mainly in API development and backend integration.
+
+I also have experience working with PostgreSQL, Redis, and Kafka in my projects.
+
+I understand how frontend applications communicate with backend services through REST APIs and real-time connections.
+
+However, I would say that my backend experience is still developing compared to my frontend experience.
+
+I am actively improving my Python skills and learning more about backend architecture, database design, authentication, and system integration.
+
+---
+Ghi chú: Thừa nhận frontend là thế mạnh nhưng không phủ nhận kinh nghiệm backend đã có trong CV, đồng thời thể hiện kế hoạch phát triển fullstack rõ ràng.`,
+      },
+      {
+        question: 'What are your strengths and weaknesses?',
+        answer: `My biggest strength is frontend development.
+
+I have solid experience with Vue 3, Nuxt 3, React, and TypeScript. I am comfortable working with complex UI, state management, API integration, and real-time applications.
+
+I am also a proactive learner and enjoy solving technical problems.
+
+Regarding my weakness, my backend knowledge is not as strong as my frontend knowledge yet.
+
+I have practical experience with Python and FastAPI, but I still need to improve my backend architecture and database design skills.
+
+I am working on this by building personal projects and learning from practical experience.`,
+      },
+      {
+        question: 'Why should we choose you for this Fullstack Developer position?',
+        answer: `I believe I am a suitable candidate because I have nearly four years of experience in web development and strong frontend skills.
+
+I have practical experience with JavaScript, TypeScript, Vue 3, Nuxt 3, and React.
+
+I have also worked on complex business applications involving authentication, payment features, API integration, and real-time communication.
+
+Besides frontend development, I have experience with Python, FastAPI, databases, and backend integration.
+
+I am a responsible person, willing to learn, and comfortable working in a team.
+
+I believe I can contribute to the frontend development of your products while continuing to grow as a fullstack engineer.`,
+      },
+      {
+        question: 'Have you used Node.js in a real project?',
+        answer: `I mainly use JavaScript and TypeScript for frontend development. I understand the basic concepts of Node.js, but most of my backend practical experience is with Python and FastAPI. I am willing to learn Node.js if the project requires it.`,
+      },
+      {
+        question: 'Are you comfortable working as a fullstack developer?',
+        answer: `Yes. I am comfortable working across frontend and backend-related tasks, especially API integration and understanding data flow between different services. My strongest area is frontend development, but I am actively improving my backend skills to become a more well-rounded fullstack developer.`,
+      },
+      {
+        question: 'Which area do you prefer, frontend or backend?',
+        answer: `I currently prefer frontend development because it is where I have the most experience and confidence. However, I also enjoy understanding backend systems because it helps me build better applications and solve problems across the entire system.`,
+      },
+    ],
+  },
+  {
+    name: 'AI Interview: Problem-Solving, Process & Teamwork',
+    category: 'AI Interview',
+    notes:
+      'Nhóm câu hỏi thực chiến (phút 5–11 trong buổi AI Interview 15 phút): tích hợp FE–BE, bài toán kỹ thuật khó (postMessage), dữ liệu real-time (Socket.IO), đảm bảo chất lượng code, debug, quản lý thời gian, học công nghệ mới và phối hợp nhóm.',
+    questions: [
+      {
+        question: 'How do you handle communication between frontend and backend?',
+        answer: `I usually communicate with backend services through REST APIs.
+
+First, I make sure that the API contract is clear, including request parameters, response structures, and error formats.
+
+Then, I create API service functions to handle requests and keep the API logic separate from UI components.
+
+For data fetching, I use tools such as Axios or TanStack Query, depending on the project.
+
+I also handle loading states, error states, authentication, and data validation.
+
+For real-time features, I have experience using Socket.IO to receive updates from the backend without continuously polling the API.
+
+I believe clear communication between frontend and backend developers is very important for maintaining a stable application.`,
+      },
+      {
+        question: 'Can you describe a challenging technical problem you solved?',
+        answer: `One challenging problem I worked on was synchronizing data between two frontend applications in the CFD WebTrade project.
+
+The Client Portal was built with Nuxt 3, while the Trading Terminal was built with React.
+
+Both applications needed to share important information, such as the active trading account, authentication state, theme, and language.
+
+To solve this problem, we implemented communication using the browser's postMessage API.
+
+When one application changed its state, it could send a message to the other application.
+
+The receiving application validated the message and updated its own state.
+
+This approach helped keep both applications synchronized without requiring a full page reload.
+
+I also learned that message origin validation and data validation are important for security.`,
+      },
+      {
+        question: 'How do you handle real-time data in web applications?',
+        answer: `In my previous project, I used Socket.IO to handle real-time data.
+
+For example, the trading terminal needed to receive market prices, account equity, margin information, orders, and execution updates.
+
+The frontend established a socket connection and listened for specific events from the backend.
+
+When new data arrived, the application updated its state and refreshed the relevant UI components.
+
+I also paid attention to connection management, reconnecting after network failures, cleaning up event listeners, and synchronizing data after reconnection.
+
+This approach provides a more responsive user experience than continuously requesting data through REST APIs.`,
+      },
+      {
+        question: 'How do you ensure the quality of your code?',
+        answer: `I focus on code quality throughout the development process.
+
+First, I try to write clean and reusable code by separating business logic, API services, and UI components.
+
+I use TypeScript to reduce type-related errors and make the code easier to maintain.
+
+I also write tests when necessary, including unit tests and end-to-end tests.
+
+In my previous project, I used Playwright to automate important user journeys, such as authentication, funding, and trading.
+
+Finally, I review my code, test different scenarios, and work with QA to identify and fix potential issues.`,
+      },
+      {
+        question: 'How do you handle bugs or unexpected issues?',
+        answer: `When I encounter a bug, I first try to reproduce it and understand the steps that cause the problem.
+
+Then, I investigate using browser developer tools, console logs, network requests, and application state.
+
+I try to identify the root cause instead of only fixing the visible symptom.
+
+After implementing a fix, I test the affected functionality and check for possible regression issues.
+
+If the problem involves backend services, I communicate with the backend developers to investigate the issue together.
+
+I believe good debugging requires patience, logical thinking, and clear communication.`,
+      },
+      {
+        question: 'How do you manage your time when working on multiple tasks?',
+        answer: `When working on multiple tasks, I usually prioritize them based on business importance, deadlines, and technical dependencies.
+
+I break large tasks into smaller steps and estimate the effort required for each one.
+
+I focus on critical tasks first and regularly update my team about progress.
+
+If I notice any risks that could affect the deadline, I communicate with the team leader as early as possible.
+
+I believe planning and communication are important for maintaining productivity and delivering quality work.`,
+      },
+      {
+        question: 'How do you learn a new technology?',
+        answer: `When learning a new technology, I usually start by understanding its core concepts and reading the official documentation.
+
+Then, I build a small practical example to understand how it works.
+
+After that, I try to apply it to a real project.
+
+I also learn from existing codebases, technical articles, and discussions with other developers.
+
+I believe learning by building something practical is one of the most effective ways to improve technical skills.`,
+      },
+      {
+        question: 'How do you work with other developers in a team?',
+        answer: `I believe teamwork is very important in software development.
+
+In my previous projects, I worked with frontend developers, backend developers, QA engineers, and other team members.
+
+I usually communicate clearly about requirements, API contracts, technical issues, and development progress.
+
+When I face a problem, I try to investigate it first and then discuss possible solutions with the team.
+
+I also respect different technical opinions and focus on finding the best solution for the product.`,
+      },
+    ],
+  },
 ];
 
 export const seedInterviewChecklist = [
@@ -1232,4 +1580,13 @@ export const seedInterviewChecklist = [
   { title: 'Giải thích pipeline RAG (Chunking, Embeddings, pgvector, Hybrid Search) và cách chống Hallucination.', category: 'AI' },
   { title: 'Phòng chống Prompt Injection, bảo mật dữ liệu (PII) và kiểm soát chất lượng code do AI sinh ra.', category: 'AI' },
   { title: 'Phân biệt Merge vs Rebase và xử lý được Git conflict an toàn kèm kiểm thử tự động.', category: 'Git' },
+  { title: 'Chuẩn bị phần giới thiệu bản thân bằng tiếng Anh (trôi chảy trong khoảng 1 phút).', category: 'AI Interview' },
+  { title: 'Nắm rõ dự án CFD WebTrade, vai trò của mình và các module đã tham gia.', category: 'AI Interview' },
+  { title: 'Trình bày được sự khác biệt giữa Nuxt/Vue và React.', category: 'AI Interview' },
+  { title: 'Giải thích được cơ chế postMessage và Socket.IO trong dự án thực tế.', category: 'AI Interview' },
+  { title: 'Nói rõ kinh nghiệm backend Python/FastAPI trung thực (phân biệt personal project WorkPulse với production).', category: 'AI Interview' },
+  { title: 'Ôn luồng API, authentication, database và payment (idempotency, timeout, bảo mật Fintech).', category: 'AI Interview' },
+  { title: 'Luyện nói ít nhất 5 câu hỏi bằng tiếng Anh mà không nhìn tài liệu.', category: 'AI Interview' },
+  { title: 'Kiểm tra microphone, camera và đường truyền mạng trước buổi AI Interview.', category: 'AI Interview' },
+  { title: 'Chọn môi trường yên tĩnh, không bị gián đoạn trong suốt 15 phút phỏng vấn.', category: 'AI Interview' },
 ];

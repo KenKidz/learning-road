@@ -116,7 +116,9 @@ const dodTopics = computed(() =>
 );
 
 async function load() {
-  loading.value = true;
+  if (!course.value) {
+    loading.value = true;
+  }
   error.value = '';
   try {
     course.value = await api.course(props.id);

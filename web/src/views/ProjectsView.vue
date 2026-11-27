@@ -133,7 +133,9 @@ const featureRate = computed(() =>
 );
 
 async function load(initializeCollapse = false) {
-  loading.value = true;
+  if (projects.value.length === 0) {
+    loading.value = true;
+  }
   error.value = '';
   try {
     const response = await api.projects();

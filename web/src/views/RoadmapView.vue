@@ -111,7 +111,9 @@ function clearFilters() {
 }
 
 async function load() {
-  loading.value = true;
+  if (courses.value.length === 0) {
+    loading.value = true;
+  }
   error.value = '';
   try {
     const response = await api.courses();

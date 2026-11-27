@@ -72,7 +72,7 @@ watch(
       <div class="sidebar-search-wrap">
         <button type="button" class="sidebar-search-btn" @click="openSearchPalette">
           <Icon name="search" :size="14" />
-          <span class="grow" style="text-align: left">{{ $t('palette.trigger') }}</span>
+          <span class="sidebar-search-label">{{ $t('palette.trigger') }}</span>
           <span class="kbd">Ctrl+K</span>
         </button>
       </div>

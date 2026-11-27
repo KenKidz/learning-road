@@ -31,6 +31,8 @@ const { t } = useI18n();
 const topics = ref<InterviewTopic[]>([]);
 const checklist = ref<InterviewChecklistItem[]>([]);
 const loading = ref(true);
+const hasLoaded = ref(false);
+const refreshing = ref(false);
 const error = ref('');
 const busy = ref(false);
 const formError = ref('');
@@ -38,6 +40,8 @@ const tab = ref<'topics' | 'practice' | 'checklist'>('topics');
 const showTopicModal = ref(false);
 const editingTopic = ref<InterviewTopic | null>(null);
 const newQuestion = reactive<Record<number, string>>({});
+const addingQuestionTopicId = ref<number | null>(null);
+const savingQuestionIds = reactive<Record<number, boolean>>({});
 const aiReviews = reactive<Record<number, AiInterviewReviewResponse>>({});
 const aiReviewingId = ref<number | null>(null);
 const checklistForm = reactive({ title: '', category: 'General' });
@@ -52,12 +56,18 @@ const topicSearch = ref('');
 const categoryFilter = ref('all');
 const statusFilter = ref<'all' | InterviewStatus>('all');
 const expandedTopicIds = ref<Set<number>>(new Set());
-const savedQuestionSnapshots = reactive<Record<number, { answer: string; confidenceLevel: number | null }>>({});
+const expandedNoteTopicIds = ref<Set<number>>(new Set());
+const collapsedQuestionIds = ref<Set<number>>(new Set());
+const savedQuestionSnapshots = reactive<
+  Record<number, { answer: string; confidenceLevel: number | null }>
+>({});
 
 const categories = computed(() => {
-  const set = new Set<string>();
-  for (const topic of topics.value) set.add(topic.category);
-  return Array.from(set);
+  const counts = new Map<string, number>();
+  for (const topic of topics.value) {
+    counts.set(topic.category, (counts.get(topic.category) ?? 0) + 1);
+  }
+  return Array.from(counts.entries()).map(([name, count]) => ({ name, count }));
 });
 
 const filteredTopics = computed(() => {
@@ -66,7 +76,10 @@ const filteredTopics = computed(() => {
     if (categoryFilter.value !== 'all' && topic.category !== categoryFilter.value) return false;
     if (statusFilter.value !== 'all' && topic.status !== statusFilter.value) return false;
     if (query) {
-      const qMatch = topic.questions.some((q) => q.question.toLowerCase().includes(query));
+      const qMatch = topic.questions.some(
+        (q) =>
+          q.question.toLowerCase().includes(query) || q.answer.toLowerCase().includes(query),
+      );
       const haystack = `${topic.name} ${topic.category} ${topic.notes}`.toLowerCase();
       if (!haystack.includes(query) && !qMatch) return false;
     }
@@ -147,15 +160,99 @@ function toggleTopic(topicId: number) {
 }
 
 function expandAllTopics() {
-  expandedTopicIds.value = new Set(filteredTopics.value.map((t) => t.id));
+  expandedTopicIds.value = new Set(filteredTopics.value.map((item) => item.id));
 }
 
 function collapseAllTopics() {
   expandedTopicIds.value = new Set();
 }
 
+function isNoteExpanded(topicId: number): boolean {
+  return expandedNoteTopicIds.value.has(topicId);
+}
+
+function toggleNoteExpand(topicId: number) {
+  const next = new Set(expandedNoteTopicIds.value);
+  if (next.has(topicId)) next.delete(topicId);
+  else next.add(topicId);
+  expandedNoteTopicIds.value = next;
+}
+
+function isLongNote(notes: string): boolean {
+  return notes.split('\n').length > 2 || notes.length > 210;
+}
+
+function isQuestionCollapsed(questionId: number): boolean {
+  return collapsedQuestionIds.value.has(questionId);
+}
+
+function toggleQuestionCollapse(questionId: number) {
+  const next = new Set(collapsedQuestionIds.value);
+  if (next.has(questionId)) next.delete(questionId);
+  else next.add(questionId);
+  collapsedQuestionIds.value = next;
+}
+
+function ratedQuestionCount(topic: InterviewTopic): number {
+  return topic.questions.filter((q) => q.confidenceLevel !== null && q.confidenceLevel > 0).length;
+}
+
+function resizeTextarea(el: HTMLTextAreaElement) {
+  const scrollY = window.scrollY;
+  el.style.height = 'auto';
+  const nextHeight = Math.min(Math.max(el.scrollHeight + 2, 104), 360);
+  el.style.height = `${nextHeight}px`;
+  if (window.scrollY !== scrollY) {
+    window.scrollTo({ top: scrollY });
+  }
+}
+
+const vAutosize = {
+  mounted(el: HTMLTextAreaElement) {
+    resizeTextarea(el);
+  },
+  updated(el: HTMLTextAreaElement) {
+    if (document.activeElement !== el) {
+      resizeTextarea(el);
+    }
+  },
+};
+
+function onTextareaInput(event: Event) {
+  const el = event.target as HTMLTextAreaElement | null;
+  if (el) resizeTextarea(el);
+}
+
+function answerStats(answer: string): string {
+  const trimmed = answer.trim();
+  if (!trimmed) return '';
+  const words = trimmed.split(/\s+/).filter(Boolean).length;
+  if (words >= 20) {
+    const seconds = Math.max(5, Math.round(words / 2.15));
+    return t('interview.wordSpeakStats', { words, seconds });
+  }
+  return t('interview.wordCountOnly', { words });
+}
+
+function confidenceBadgeClass(level: number | null): string {
+  if (!level) return 'badge-neutral';
+  if (level >= 4) return 'badge-success';
+  if (level === 3) return 'badge-info';
+  return 'badge-warning';
+}
+
+function confidencePillClass(level: number): string {
+  if (level >= 4) return 'level-high';
+  if (level === 3) return 'level-mid';
+  return 'level-low';
+}
+
 async function load(initExpand = false) {
-  loading.value = true;
+  if (!hasLoaded.value) {
+    loading.value = true;
+  } else {
+    refreshing.value = true;
+  }
   error.value = '';
   try {
     const response = await api.interview();
@@ -165,22 +262,29 @@ async function load(initExpand = false) {
     if (initExpand) {
       const reviewing = response.topics.filter((topic) => topic.status === 'reviewing');
       if (reviewing.length > 0) {
-        expandedTopicIds.value = new Set(reviewing.map((t) => t.id));
+        expandedTopicIds.value = new Set(reviewing.map((item) => item.id));
       } else if (response.topics[0]) {
         expandedTopicIds.value = new Set([response.topics[0].id]);
       }
     }
+    hasLoaded.value = true;
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : t('errors.interviewLoad');
+    const message = err instanceof ApiError ? err.message : t('errors.interviewLoad');
+    if (!hasLoaded.value) {
+      error.value = message;
+    } else {
+      toast.error(message);
+    }
   } finally {
     loading.value = false;
+    refreshing.value = false;
   }
 }
 
 function openTopicCreate() {
   editingTopic.value = null;
   topicForm.name = '';
-  topicForm.category = 'Frontend';
+  topicForm.category = categoryFilter.value !== 'all' ? categoryFilter.value : 'Frontend';
   topicForm.status = 'not_reviewed';
   topicForm.notes = '';
   formError.value = '';
@@ -212,15 +316,29 @@ async function saveTopic() {
       notes: topicForm.notes.trim(),
     };
     if (editingTopic.value) {
-      await api.updateInterviewTopic(editingTopic.value.id, payload);
+      const updated = await api.updateInterviewTopic(editingTopic.value.id, payload);
+      const target = topics.value.find((item) => item.id === updated.id);
+      if (target) {
+        target.name = updated.name;
+        target.category = updated.category;
+        target.status = updated.status;
+        target.notes = updated.notes;
+        target.lastReviewedAt = updated.lastReviewedAt;
+        target.updatedAt = updated.updatedAt;
+      }
       toast.success(t('interview.topicSaved'));
     } else {
       const created = await api.createInterviewTopic(payload);
+      topics.value = [...topics.value, created];
       expandedTopicIds.value = new Set([...expandedTopicIds.value, created.id]);
       toast.success(t('interview.topicCreated'));
+      await nextTick();
+      document.getElementById(`interview-topic-${created.id}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+      });
     }
     showTopicModal.value = false;
-    await load();
   } catch (err) {
     formError.value = err instanceof ApiError ? err.message : t('errors.unexpected');
   } finally {
@@ -238,8 +356,12 @@ async function removeTopic(topic: InterviewTopic) {
   if (!confirmed) return;
   try {
     await api.deleteInterviewTopic(topic.id);
+    for (const q of topic.questions) {
+      delete savedQuestionSnapshots[q.id];
+      delete aiReviews[q.id];
+    }
+    topics.value = topics.value.filter((item) => item.id !== topic.id);
     toast.success(t('interview.topicDeleted'));
-    await load();
   } catch (err) {
     toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
   }
@@ -249,8 +371,10 @@ async function changeTopicStatus(topic: InterviewTopic, event: Event) {
   const status = (event.target as HTMLSelectElement).value as InterviewStatus;
   if (status === topic.status) return;
   try {
-    await api.updateInterviewTopic(topic.id, { status });
-    await load();
+    const updated = await api.updateInterviewTopic(topic.id, { status });
+    topic.status = updated.status;
+    topic.lastReviewedAt = updated.lastReviewedAt;
+    topic.updatedAt = updated.updatedAt;
   } catch (err) {
     toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
   }
@@ -258,9 +382,12 @@ async function changeTopicStatus(topic: InterviewTopic, event: Event) {
 
 async function markReviewed(topic: InterviewTopic) {
   try {
-    await api.updateInterviewTopic(topic.id, { lastReviewedAt: new Date().toISOString() });
+    const updated = await api.updateInterviewTopic(topic.id, {
+      lastReviewedAt: new Date().toISOString(),
+    });
+    topic.lastReviewedAt = updated.lastReviewedAt;
+    topic.updatedAt = updated.updatedAt;
     toast.success(t('interview.reviewedDateSaved', { name: topic.name }));
-    await load();
   } catch (err) {
     toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
   }
@@ -271,26 +398,40 @@ function setConfidence(question: InterviewQuestion, level: number) {
 }
 
 async function saveQuestion(question: InterviewQuestion) {
+  if (savingQuestionIds[question.id]) return;
+  savingQuestionIds[question.id] = true;
   try {
     const confidence =
       question.confidenceLevel === null || question.confidenceLevel === undefined
         ? null
         : Number(question.confidenceLevel);
-    await api.updateQuestion(question.id, {
+    const updated = await api.updateQuestion(question.id, {
       answer: question.answer,
       confidenceLevel: confidence,
     });
+    question.answer = updated.answer;
+    question.confidenceLevel = updated.confidenceLevel;
+    question.lastReviewedAt = updated.lastReviewedAt;
+    question.updatedAt = updated.updatedAt;
+    savedQuestionSnapshots[question.id] = {
+      answer: updated.answer,
+      confidenceLevel: updated.confidenceLevel ?? null,
+    };
     toast.success(t('interview.answerSaved'));
-    await load();
   } catch (err) {
     toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
+  } finally {
+    savingQuestionIds[question.id] = false;
   }
 }
 
 async function markQuestionReviewed(question: InterviewQuestion) {
   try {
-    await api.updateQuestion(question.id, { lastReviewedAt: new Date().toISOString() });
-    await load();
+    const updated = await api.updateQuestion(question.id, {
+      lastReviewedAt: new Date().toISOString(),
+    });
+    question.lastReviewedAt = updated.lastReviewedAt;
+    question.updatedAt = updated.updatedAt;
     toast.success(t('interview.questionReviewedSaved'));
   } catch (err) {
     toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
@@ -299,19 +440,32 @@ async function markQuestionReviewed(question: InterviewQuestion) {
 
 async function addQuestion(topic: InterviewTopic) {
   const text = (newQuestion[topic.id] ?? '').trim();
-  if (!text) return;
+  if (!text || addingQuestionTopicId.value === topic.id) return;
+  addingQuestionTopicId.value = topic.id;
   try {
-    await api.createQuestion(topic.id, { question: text, answer: '' });
+    const created = await api.createQuestion(topic.id, { question: text, answer: '' });
+    topic.questions.push(created);
+    savedQuestionSnapshots[created.id] = {
+      answer: created.answer,
+      confidenceLevel: created.confidenceLevel ?? null,
+    };
     newQuestion[topic.id] = '';
     expandedTopicIds.value = new Set([...expandedTopicIds.value, topic.id]);
     toast.success(t('interview.questionAdded'));
-    await load();
+    await nextTick();
+    const textarea = document.getElementById(`answer-${created.id}`) as HTMLTextAreaElement | null;
+    if (textarea) {
+      textarea.focus({ preventScroll: true });
+      textarea.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
   } catch (err) {
     toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
+  } finally {
+    addingQuestionTopicId.value = null;
   }
 }
 
-async function removeQuestion(question: InterviewQuestion) {
+async function removeQuestion(topic: InterviewTopic, question: InterviewQuestion) {
   const confirmed = await confirmAction({
     title: t('interview.deleteQuestionTitle'),
     message: t('interview.deleteQuestionText'),
@@ -321,8 +475,10 @@ async function removeQuestion(question: InterviewQuestion) {
   if (!confirmed) return;
   try {
     await api.deleteQuestion(question.id);
+    topic.questions = topic.questions.filter((item) => item.id !== question.id);
+    delete savedQuestionSnapshots[question.id];
+    delete aiReviews[question.id];
     toast.success(t('interview.questionDeleted'));
-    await load();
   } catch (err) {
     toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
   }
@@ -330,8 +486,8 @@ async function removeQuestion(question: InterviewQuestion) {
 
 async function toggleChecklistItem(item: InterviewChecklistItem) {
   try {
-    await api.updateChecklistItem(item.id, { isCompleted: !item.isCompleted });
-    await load();
+    const updated = await api.updateChecklistItem(item.id, { isCompleted: !item.isCompleted });
+    item.isCompleted = updated.isCompleted;
   } catch (err) {
     toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
   }
@@ -340,13 +496,13 @@ async function toggleChecklistItem(item: InterviewChecklistItem) {
 async function addChecklistItem() {
   if (!checklistForm.title.trim()) return;
   try {
-    await api.createChecklistItem({
+    const created = await api.createChecklistItem({
       title: checklistForm.title.trim(),
       category: checklistForm.category.trim() || 'General',
     });
+    checklist.value = [...checklist.value, created];
     checklistForm.title = '';
     toast.success(t('interview.knowledgeAdded'));
-    await load();
   } catch (err) {
     toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
   }
@@ -362,8 +518,8 @@ async function removeChecklistItem(item: InterviewChecklistItem) {
   if (!confirmed) return;
   try {
     await api.deleteChecklistItem(item.id);
+    checklist.value = checklist.value.filter((entry) => entry.id !== item.id);
     toast.success(t('interview.knowledgeDeleted'));
-    await load();
   } catch (err) {
     toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
   }
@@ -393,15 +549,23 @@ async function reviewWithAi(question: InterviewQuestion) {
 async function applyAiReview(question: InterviewQuestion) {
   const review = aiReviews[question.id];
   if (!review) return;
-  question.answer = review.improvedAnswer;
-  question.confidenceLevel = review.suggestedConfidence;
   try {
-    await api.updateQuestion(question.id, {
+    const updated = await api.updateQuestion(question.id, {
       answer: review.improvedAnswer,
       confidenceLevel: review.suggestedConfidence,
     });
+    question.answer = updated.answer;
+    question.confidenceLevel = updated.confidenceLevel;
+    question.lastReviewedAt = updated.lastReviewedAt;
+    question.updatedAt = updated.updatedAt;
+    savedQuestionSnapshots[question.id] = {
+      answer: updated.answer,
+      confidenceLevel: updated.confidenceLevel ?? null,
+    };
     toast.success(t('ai.interviewAppliedToast'));
-    await load();
+    await nextTick();
+    const textarea = document.getElementById(`answer-${question.id}`) as HTMLTextAreaElement | null;
+    if (textarea) resizeTextarea(textarea);
   } catch (err) {
     toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
   }
@@ -411,9 +575,13 @@ async function addFollowUpQuestion(topic: InterviewTopic, followUp: string) {
   const trimmed = followUp.trim();
   if (!trimmed) return;
   try {
-    await api.createQuestion(topic.id, { question: trimmed, answer: '' });
+    const created = await api.createQuestion(topic.id, { question: trimmed, answer: '' });
+    topic.questions.push(created);
+    savedQuestionSnapshots[created.id] = {
+      answer: created.answer,
+      confidenceLevel: created.confidenceLevel ?? null,
+    };
     toast.success(t('interview.questionAdded'));
-    await load();
   } catch (err) {
     toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
   }
@@ -457,8 +625,8 @@ onMounted(async () => {
     :subtitle="$t('interview.subtitle')"
   >
     <template #actions>
-      <button type="button" class="btn" :disabled="loading" @click="load()">
-        <Icon name="refresh" :size="16" /> {{ $t('common.refresh') }}
+      <button type="button" class="btn" :disabled="loading || refreshing" @click="load()">
+        <Icon name="refresh" :size="16" :class="{ spin: refreshing }" /> {{ $t('common.refresh') }}
       </button>
       <button type="button" class="btn btn-primary" @click="openTopicCreate">
         <Icon name="plus" :size="16" /> {{ $t('interview.addTopic') }}
@@ -529,7 +697,7 @@ onMounted(async () => {
     <div v-if="tab === 'topics'" class="stack mt-16">
       <div v-if="topics.length > 0" class="card compact">
         <div class="row wrap" style="gap: 10px">
-          <div class="input-wrap" style="max-width: 280px">
+          <div class="input-wrap" style="max-width: 300px">
             <Icon name="search" :size="15" class="input-icon-left" />
             <input
               v-model="topicSearch"
@@ -549,13 +717,7 @@ onMounted(async () => {
               <Icon name="close" :size="13" />
             </button>
           </div>
-          <select v-model="categoryFilter" class="select input-sm" style="max-width: 190px">
-            <option value="all">{{ $t('interview.allCategories') }}</option>
-            <option v-for="category in categories" :key="category" :value="category">
-              {{ category }}
-            </option>
-          </select>
-          <select v-model="statusFilter" class="select input-sm" style="max-width: 190px">
+          <select v-model="statusFilter" class="select input-sm" style="max-width: 180px">
             <option value="all">{{ $t('interview.allStatuses') }}</option>
             <option v-for="status in INTERVIEW_STATUSES" :key="status" :value="status">
               {{ interviewStatusLabels[status] }}
@@ -572,6 +734,27 @@ onMounted(async () => {
             "
           >
             {{ $t('common.clear') }}
+          </button>
+        </div>
+
+        <div v-if="categories.length > 1" class="filter-pills-row">
+          <button
+            type="button"
+            class="chip"
+            :class="{ active: categoryFilter === 'all' }"
+            @click="categoryFilter = 'all'"
+          >
+            {{ $t('common.all') }} ({{ topics.length }})
+          </button>
+          <button
+            v-for="cat in categories"
+            :key="cat.name"
+            type="button"
+            class="chip"
+            :class="{ active: categoryFilter === cat.name }"
+            @click="categoryFilter = cat.name"
+          >
+            {{ cat.name }} ({{ cat.count }})
           </button>
         </div>
       </div>
@@ -598,7 +781,13 @@ onMounted(async () => {
         </EmptyState>
       </div>
 
-      <section v-for="topic in filteredTopics" :id="`interview-topic-${topic.id}`" :key="topic.id" class="accordion-card">
+      <section
+        v-for="topic in filteredTopics"
+        :id="`interview-topic-${topic.id}`"
+        :key="topic.id"
+        class="accordion-card"
+        :class="`status-${topic.status}`"
+      >
         <div class="accordion-head">
           <button
             type="button"
@@ -612,7 +801,7 @@ onMounted(async () => {
               class="accordion-chevron"
             />
             <div class="grow">
-              <div class="row wrap" style="gap: 6px">
+              <div class="row wrap" style="gap: 7px">
                 <h2>{{ topic.name }}</h2>
                 <span class="badge badge-outline">{{ topic.category }}</span>
                 <span
@@ -622,17 +811,20 @@ onMounted(async () => {
                   {{ interviewStatusLabels[topic.status] }}
                 </span>
               </div>
-              <p class="card-hint">
-                {{ $t('interview.lastReviewed', { date: formatDate(topic.lastReviewedAt) }) }} ·
-                {{ $t('interview.questionCount', { count: topic.questions.length }) }}
+              <p class="card-hint tabular">
+                {{ $t('interview.lastReviewed', { date: formatDate(topic.lastReviewedAt) }) }}
+                · {{ $t('interview.questionCount', { count: topic.questions.length }) }}
+                <template v-if="topic.questions.length > 0">
+                  · {{ $t('interview.ratedCount', { rated: ratedQuestionCount(topic), total: topic.questions.length }) }}
+                </template>
               </p>
             </div>
           </button>
 
-          <div class="row wrap" style="gap: 4px">
+          <div class="accordion-actions">
             <select
               class="select input-sm"
-              style="max-width: 140px"
+              style="width: 126px"
               :value="topic.status"
               :aria-label="$t('interview.statusAria', { name: topic.name })"
               @change="changeTopicStatus(topic, $event)"
@@ -641,68 +833,162 @@ onMounted(async () => {
                 {{ interviewStatusLabels[status] }}
               </option>
             </select>
-            <button type="button" class="btn btn-sm" @click="markReviewed(topic)">{{ $t('interview.reviewed') }}</button>
-            <button type="button" class="btn btn-ghost btn-icon btn-sm" :title="$t('interview.editTopic')" @click="openTopicEdit(topic)">
+            <button type="button" class="btn btn-sm" @click="markReviewed(topic)">
+              <Icon name="check" :size="13" /> {{ $t('interview.reviewed') }}
+            </button>
+            <span class="accordion-actions-sep" aria-hidden="true" />
+            <button
+              type="button"
+              class="btn btn-ghost btn-icon btn-sm"
+              :title="$t('interview.editTopic')"
+              :aria-label="$t('interview.editTopic')"
+              @click="openTopicEdit(topic)"
+            >
               <Icon name="edit" :size="15" />
             </button>
-            <button type="button" class="btn btn-ghost btn-icon btn-sm btn-danger-hover" :title="$t('interview.deleteTopic')" @click="removeTopic(topic)">
+            <button
+              type="button"
+              class="btn btn-ghost btn-icon btn-sm btn-danger-hover"
+              :title="$t('interview.deleteTopic')"
+              :aria-label="$t('interview.deleteTopic')"
+              @click="removeTopic(topic)"
+            >
               <Icon name="trash" :size="15" />
             </button>
           </div>
         </div>
 
         <div v-if="isTopicExpanded(topic.id)" class="accordion-body">
-          <p v-if="topic.notes" class="text-soft" style="white-space: pre-line; margin-bottom: 14px">{{ topic.notes }}</p>
+          <div v-if="topic.notes" class="topic-notes-callout">
+            <div class="topic-notes-head">
+              <span class="topic-notes-title">
+                <Icon name="info" :size="13" /> {{ $t('interview.notesLabel') }}
+              </span>
+              <button
+                v-if="isLongNote(topic.notes)"
+                type="button"
+                class="link-btn"
+                @click="toggleNoteExpand(topic.id)"
+              >
+                {{ isNoteExpanded(topic.id) ? $t('interview.hideNotes') : $t('interview.showNotes') }}
+              </button>
+            </div>
+            <p
+              class="topic-notes-body"
+              :class="{ 'is-clamped': isLongNote(topic.notes) && !isNoteExpanded(topic.id) }"
+            >
+              {{ topic.notes }}
+            </p>
+          </div>
 
           <div v-if="topic.questions.length === 0">
             <EmptyState :title="$t('interview.noQuestionsTitle')" :text="$t('interview.noQuestionsText')" icon="interview" />
           </div>
-          <div v-else class="stack-sm">
-            <article v-for="question in topic.questions" :key="question.id" class="feature-card">
-              <div class="row-between wrap" style="gap: 8px">
-                <strong class="grow">{{ question.question }}</strong>
-                <div class="row" style="gap: 4px">
-                  <span v-if="isQuestionDirty(question)" class="badge badge-warning">{{ $t('common.unsaved') }}</span>
-                  <span class="badge badge-neutral tabular">{{ confidenceLabel(question.confidenceLevel) }}</span>
-                  <button type="button" class="btn btn-ghost btn-icon btn-sm" :title="$t('interview.reviewQuestion')" @click="markQuestionReviewed(question)">
+
+          <div v-else class="question-list">
+            <article
+              v-for="(question, qIndex) in topic.questions"
+              :key="question.id"
+              class="question-card"
+              :class="{ 'is-dirty': isQuestionDirty(question) }"
+            >
+              <div class="question-head">
+                <button
+                  type="button"
+                  class="question-title-btn"
+                  :aria-expanded="!isQuestionCollapsed(question.id)"
+                  @click="toggleQuestionCollapse(question.id)"
+                >
+                  <span class="question-index tabular">{{ String(qIndex + 1).padStart(2, '0') }}</span>
+                  <span class="question-title-text">{{ question.question }}</span>
+                </button>
+
+                <div class="question-head-actions">
+                  <span v-if="isQuestionDirty(question)" class="badge badge-warning">
+                    {{ $t('common.unsaved') }}
+                  </span>
+                  <span class="badge tabular" :class="confidenceBadgeClass(question.confidenceLevel)">
+                    {{ confidenceLabel(question.confidenceLevel) }}
+                  </span>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-icon btn-sm"
+                    :title="$t('interview.reviewQuestion')"
+                    :aria-label="$t('interview.reviewQuestion')"
+                    @click="markQuestionReviewed(question)"
+                  >
                     <Icon name="check" :size="14" />
                   </button>
-                  <button type="button" class="btn btn-ghost btn-icon btn-sm btn-danger-hover" :title="$t('interview.deleteQuestion')" @click="removeQuestion(question)">
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-icon btn-sm"
+                    :title="isQuestionCollapsed(question.id) ? $t('interview.expandQuestion') : $t('interview.collapseQuestion')"
+                    :aria-label="isQuestionCollapsed(question.id) ? $t('interview.expandQuestion') : $t('interview.collapseQuestion')"
+                    @click="toggleQuestionCollapse(question.id)"
+                  >
+                    <Icon :name="isQuestionCollapsed(question.id) ? 'chevron-right' : 'chevron-down'" :size="14" />
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-icon btn-sm btn-danger-hover"
+                    :title="$t('interview.deleteQuestion')"
+                    :aria-label="$t('interview.deleteQuestion')"
+                    @click="removeQuestion(topic, question)"
+                  >
                     <Icon name="trash" :size="14" />
                   </button>
                 </div>
               </div>
 
-              <div class="stack-sm mt-12">
-                <div class="field">
-                  <label class="field-label" :for="`answer-${question.id}`">{{ $t('interview.answerLabel') }}</label>
-                  <textarea
-                    :id="`answer-${question.id}`"
-                    v-model="question.answer"
-                    class="textarea"
-                    :placeholder="$t('interview.answerPlaceholder')"
-                  />
-                </div>
+              <p v-if="isQuestionCollapsed(question.id)" class="question-preview">
+                {{ question.answer.trim() || $t('interview.noAnswerYet') }}
+              </p>
 
-                <div class="row-between wrap" style="gap: 10px">
-                  <div class="row wrap" style="gap: 8px">
-                    <span class="field-label">{{ $t('interview.confidence') }}:</span>
-                    <div class="confidence-pills" role="group" :aria-label="$t('interview.confidence')">
-                      <button
-                        v-for="level in [1, 2, 3, 4, 5]"
-                        :key="level"
-                        type="button"
-                        class="confidence-pill tabular"
-                        :class="{ active: question.confidenceLevel === level }"
-                        :aria-pressed="question.confidenceLevel === level"
-                        @click="setConfidence(question, level)"
-                      >
-                        {{ level }}
-                      </button>
+              <div v-else class="question-body">
+                <textarea
+                  :id="`answer-${question.id}`"
+                  v-model="question.answer"
+                  v-autosize
+                  class="question-textarea"
+                  :aria-label="`${$t('interview.answerLabel')}: ${question.question}`"
+                  :placeholder="$t('interview.answerPlaceholder')"
+                  @input="onTextareaInput"
+                  @keydown.ctrl.enter.prevent="saveQuestion(question)"
+                  @keydown.meta.enter.prevent="saveQuestion(question)"
+                />
+
+                <div class="question-footer">
+                  <div class="question-footer-left">
+                    <div class="row" style="gap: 8px">
+                      <span class="field-label">{{ $t('interview.confidence') }}</span>
+                      <div class="confidence-pills" role="group" :aria-label="$t('interview.confidence')">
+                        <button
+                          v-for="level in [1, 2, 3, 4, 5]"
+                          :key="level"
+                          type="button"
+                          class="confidence-pill tabular"
+                          :class="[
+                            confidencePillClass(level),
+                            { active: question.confidenceLevel === level },
+                          ]"
+                          :aria-pressed="question.confidenceLevel === level"
+                          @click="setConfidence(question, level)"
+                        >
+                          {{ level }}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="question-meta-inline tabular">
+                      <span>{{ $t('interview.questionReviewed', { date: formatDateTime(question.lastReviewedAt) }) }}</span>
+                      <template v-if="answerStats(question.answer)">
+                        <span class="sep">·</span>
+                        <span>{{ answerStats(question.answer) }}</span>
+                      </template>
                     </div>
                   </div>
 
-                  <div class="row wrap" style="gap: 8px">
+                  <div class="question-footer-right">
                     <button
                       type="button"
                       class="btn btn-sm"
@@ -719,104 +1005,118 @@ onMounted(async () => {
                     </button>
                     <button
                       type="button"
-                      class="btn btn-primary btn-sm"
+                      class="btn btn-sm"
+                      :class="isQuestionDirty(question) ? 'btn-primary' : 'btn-saved'"
+                      :disabled="savingQuestionIds[question.id] || !isQuestionDirty(question)"
+                      :title="isQuestionDirty(question) ? $t('interview.saveShortcutHint') : undefined"
                       @click="saveQuestion(question)"
                     >
-                      {{ $t('interview.saveAnswer') }}
+                      <span v-if="savingQuestionIds[question.id]" class="spinner" />
+                      <Icon v-else-if="!isQuestionDirty(question)" name="check" :size="13" />
+                      {{
+                        savingQuestionIds[question.id]
+                          ? $t('interview.saving')
+                          : isQuestionDirty(question)
+                            ? $t('interview.saveAnswer')
+                            : $t('interview.saved')
+                      }}
                     </button>
                   </div>
                 </div>
-              </div>
 
-              <div v-if="aiReviews[question.id]" class="ai-review-box mt-16">
-                <div class="row-between wrap" style="gap: 8px">
-                  <div class="row" style="gap: 6px">
-                    <Icon name="sparkles" :size="16" class="text-info" />
-                    <strong>{{ $t('ai.interviewResultTitle') }}</strong>
-                  </div>
-                  <span class="badge badge-info tabular">
-                    {{
-                      $t('ai.interviewSuggestedConfidence', {
-                        level: aiReviews[question.id]!.suggestedConfidence,
-                      })
-                    }}
-                  </span>
-                </div>
-                <p class="mt-8">{{ aiReviews[question.id]!.summary }}</p>
-
-                <div class="grid cols-2 mt-12">
-                  <div v-if="aiReviews[question.id]!.strengths.length > 0" class="ai-callout strengths">
-                    <div class="field-label">{{ $t('ai.interviewStrengths') }}</div>
-                    <ul class="stack-sm mt-8">
-                      <li
-                        v-for="(point, idx) in aiReviews[question.id]!.strengths"
-                        :key="idx"
-                        class="text-soft"
-                      >
-                        • {{ point }}
-                      </li>
-                    </ul>
-                  </div>
-                  <div v-if="aiReviews[question.id]!.missingPoints.length > 0" class="ai-callout missing">
-                    <div class="field-label">{{ $t('ai.interviewMissing') }}</div>
-                    <ul class="stack-sm mt-8">
-                      <li
-                        v-for="(point, idx) in aiReviews[question.id]!.missingPoints"
-                        :key="idx"
-                        class="text-soft"
-                      >
-                        • {{ point }}
-                      </li>
-                    </ul>
-                  </div>
-                </div>
-
-                <div class="mt-12">
+                <div v-if="aiReviews[question.id]" class="ai-review-box">
                   <div class="row-between wrap" style="gap: 8px">
-                    <span class="field-label">{{ $t('ai.interviewImprovedAnswer') }}</span>
-                    <button
-                      type="button"
-                      class="btn btn-sm"
-                      @click="applyAiReview(question)"
-                    >
-                      {{ $t('ai.interviewApplyAnswer') }}
-                    </button>
+                    <div class="row" style="gap: 6px">
+                      <Icon name="sparkles" :size="16" class="text-info" />
+                      <strong>{{ $t('ai.interviewResultTitle') }}</strong>
+                    </div>
+                    <span class="badge badge-info tabular">
+                      {{
+                        $t('ai.interviewSuggestedConfidence', {
+                          level: aiReviews[question.id]!.suggestedConfidence,
+                        })
+                      }}
+                    </span>
                   </div>
-                  <p class="text-soft mt-8" style="white-space: pre-line">
-                    {{ aiReviews[question.id]!.improvedAnswer }}
-                  </p>
-                </div>
+                  <p class="mt-8">{{ aiReviews[question.id]!.summary }}</p>
 
-                <div v-if="aiReviews[question.id]!.followUpQuestions.length > 0" class="mt-12">
-                  <div class="field-label">{{ $t('ai.interviewFollowUps') }}</div>
-                  <div class="row wrap mt-8" style="gap: 8px">
-                    <button
-                      v-for="(followUp, idx) in aiReviews[question.id]!.followUpQuestions"
-                      :key="idx"
-                      type="button"
-                      class="btn btn-sm"
-                      @click="addFollowUpQuestion(topic, followUp)"
-                    >
-                      <Icon name="plus" :size="13" /> {{ followUp }}
-                    </button>
+                  <div class="grid cols-2 mt-12">
+                    <div v-if="aiReviews[question.id]!.strengths.length > 0" class="ai-callout strengths">
+                      <div class="field-label">{{ $t('ai.interviewStrengths') }}</div>
+                      <ul class="stack-sm mt-8">
+                        <li
+                          v-for="(point, idx) in aiReviews[question.id]!.strengths"
+                          :key="idx"
+                          class="text-soft"
+                        >
+                          • {{ point }}
+                        </li>
+                      </ul>
+                    </div>
+                    <div v-if="aiReviews[question.id]!.missingPoints.length > 0" class="ai-callout missing">
+                      <div class="field-label">{{ $t('ai.interviewMissing') }}</div>
+                      <ul class="stack-sm mt-8">
+                        <li
+                          v-for="(point, idx) in aiReviews[question.id]!.missingPoints"
+                          :key="idx"
+                          class="text-soft"
+                        >
+                          • {{ point }}
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div class="mt-12">
+                    <div class="row-between wrap" style="gap: 8px">
+                      <span class="field-label">{{ $t('ai.interviewImprovedAnswer') }}</span>
+                      <button
+                        type="button"
+                        class="btn btn-sm"
+                        @click="applyAiReview(question)"
+                      >
+                        {{ $t('ai.interviewApplyAnswer') }}
+                      </button>
+                    </div>
+                    <p class="text-soft mt-8" style="white-space: pre-line">
+                      {{ aiReviews[question.id]!.improvedAnswer }}
+                    </p>
+                  </div>
+
+                  <div v-if="aiReviews[question.id]!.followUpQuestions.length > 0" class="mt-12">
+                    <div class="field-label">{{ $t('ai.interviewFollowUps') }}</div>
+                    <div class="row wrap mt-8" style="gap: 8px">
+                      <button
+                        v-for="(followUp, idx) in aiReviews[question.id]!.followUpQuestions"
+                        :key="idx"
+                        type="button"
+                        class="btn btn-sm"
+                        @click="addFollowUpQuestion(topic, followUp)"
+                      >
+                        <Icon name="plus" :size="13" /> {{ followUp }}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
-
-              <p class="card-hint mt-8 tabular">
-                {{ $t('interview.questionReviewed', { date: formatDateTime(question.lastReviewedAt) }) }}
-              </p>
             </article>
           </div>
 
-          <form class="row mt-16" style="gap: 8px" @submit.prevent="addQuestion(topic)">
+          <form class="quick-add-bar" @submit.prevent="addQuestion(topic)">
+            <Icon name="plus" :size="15" class="muted" />
             <input
               v-model="newQuestion[topic.id]"
-              class="input input-sm"
+              class="input input-sm grow"
               :placeholder="$t('interview.addQuestionPlaceholder')"
               :aria-label="$t('interview.addQuestionAria', { name: topic.name })"
             />
-            <button type="submit" class="btn btn-sm" :disabled="!(newQuestion[topic.id] ?? '').trim()">
+            <button
+              type="submit"
+              class="btn btn-sm"
+              :class="{ 'btn-primary': Boolean((newQuestion[topic.id] ?? '').trim()) }"
+              :disabled="!(newQuestion[topic.id] ?? '').trim() || addingQuestionTopicId === topic.id"
+            >
+              <span v-if="addingQuestionTopicId === topic.id" class="spinner" />
               {{ $t('interview.addQuestion') }}
             </button>
           </form>
@@ -907,7 +1207,7 @@ onMounted(async () => {
         <label class="field-label" for="interview-topic-category">{{ $t('interview.categoryAria') }}</label>
         <input id="interview-topic-category" v-model="topicForm.category" class="input" list="topic-categories" required />
         <datalist id="topic-categories">
-          <option v-for="category in categories" :key="category" :value="category" />
+          <option v-for="cat in categories" :key="cat.name" :value="cat.name" />
         </datalist>
       </div>
       <div class="field">

@@ -102,7 +102,9 @@ const totalCounts = computed(() =>
 );
 
 async function load() {
-  loading.value = true;
+  if (applications.value.length === 0 && !settings.value) {
+    loading.value = true;
+  }
   error.value = '';
   try {
     const [jobsResponse, settingsResponse] = await Promise.all([api.jobs(), api.settings()]);
