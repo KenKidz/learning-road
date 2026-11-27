@@ -1,10 +1,15 @@
 import type {
+  AiCustomHeader,
   AiInterviewReviewRequest,
   AiInterviewReviewResponse,
+  AiSettings,
+  AiSettingsUpdateRequest,
   AiStatus,
   AiStudyPlanRequest,
   AiStudyPlanResponse,
   AiSuggestedTask,
+  AiTestRequest,
+  AiTestResponse,
   AiWeeklyCoachRequest,
   AiWeeklyCoachResponse,
   AnalyticsData,
@@ -201,6 +206,10 @@ export const api = {
   updateSettings: (body: unknown) => patch<UserSettings>('/settings', body),
 
   aiStatus: () => get<AiStatus>('/ai/status'),
+  aiSettings: () => get<AiSettings>('/ai/settings'),
+  updateAiSettings: (body: AiSettingsUpdateRequest) => patch<AiSettings>('/ai/settings', body),
+  resetAiSettings: () => request<AiSettings>('/ai/settings', { method: 'DELETE' }),
+  testAiConnection: (body: AiTestRequest = {}) => post<AiTestResponse>('/ai/test', body),
   aiInterviewReview: (body: AiInterviewReviewRequest) =>
     post<AiInterviewReviewResponse>('/ai/interview-review', {
       locale: currentLocale(),
@@ -334,10 +343,15 @@ export async function downloadExport(): Promise<void> {
 }
 
 export type {
+  AiCustomHeader,
   AiInterviewReviewResponse,
+  AiSettings,
+  AiSettingsUpdateRequest,
   AiStatus,
   AiStudyPlanResponse,
   AiSuggestedTask,
+  AiTestRequest,
+  AiTestResponse,
   CourseSummary,
   CourseDetail,
   Task,

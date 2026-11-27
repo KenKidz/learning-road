@@ -2,7 +2,6 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AppDb } from '../db/client';
 import { interviewQuestions, interviewTopics } from '../db/schema';
-import { env } from '../env';
 import { AppError } from '../lib/errors';
 import { addDays, todayInTimezone } from '../lib/dates';
 import {
@@ -14,9 +13,18 @@ import {
   type AiStudyPlanRequest,
   type AiStudyPlanResponse,
   type AiSuggestedTask,
+  type AiTestRequest,
+  type AiTestResponse,
   type AiWeeklyCoachRequest,
   type AiWeeklyCoachResponse,
 } from '../../shared/types';
+import {
+  buildAiRequestHeaders,
+  mergeDraftAiConfig,
+  resolveAiConfig,
+  resolveEnvAiConfig,
+  type ResolvedAiConfig,
+} from './ai-settings';
 import { loadCourses, toCourseSummaries } from './courses';
 import { buildDashboard } from './dashboard';
 import { getSettingsRow, serializeSettings } from './settings';
@@ -32,6 +40,7 @@ export interface AiCompletionOptions {
   jsonMode?: boolean;
   temperature?: number;
   signal?: AbortSignal;
+  config?: ResolvedAiConfig;
 }
 
 export interface AiProvider {
@@ -39,12 +48,12 @@ export interface AiProvider {
   stream(options: AiCompletionOptions): AsyncIterable<string>;
 }
 
-function assertAiConfigured(): void {
-  if (!env.aiEnabled) {
+export function assertAiConfigured(config: ResolvedAiConfig): void {
+  if (!config.enabled) {
     throw new AppError(
       503,
       'AI_NOT_CONFIGURED',
-      'Tính năng AI chưa được cấu hình. Hãy thêm AI_API_KEY vào file .env ở server.',
+      'Tính năng AI chưa được cấu hình. Hãy thiết lập trong trang Cài đặt hoặc thêm AI_API_KEY vào file .env.',
     );
   }
 }
@@ -84,26 +93,23 @@ async function readProviderError(response: Response): Promise<string> {
 }
 
 const defaultProvider: AiProvider = {
-  async complete({ messages, jsonMode = false, temperature = 0.3, signal }) {
-    assertAiConfigured();
-    const url = `${env.aiBaseUrl}/chat/completions`;
+  async complete({ messages, jsonMode = false, temperature = 0.3, signal, config: passedConfig }) {
+    const config = passedConfig ?? resolveEnvAiConfig();
+    assertAiConfigured(config);
+    const url = `${config.baseUrl}/chat/completions`;
     let response: Response;
     try {
       response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${env.aiApiKey}`,
-          'x-opencode-session': env.aiSessionId,
-        },
+        headers: buildAiRequestHeaders(config),
         body: JSON.stringify({
-          model: env.aiModel,
+          model: config.model,
           messages,
           temperature,
-          ...(env.aiReasoningEffort ? { reasoning_effort: env.aiReasoningEffort } : {}),
+          ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
           ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
         }),
-        signal: combineSignals(env.aiTimeoutMs, signal),
+        signal: combineSignals(config.timeoutMs, signal),
       });
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
@@ -112,7 +118,7 @@ const defaultProvider: AiProvider = {
       throw new AppError(
         502,
         'AI_PROVIDER_ERROR',
-        'Không thể kết nối tới nhà cung cấp AI. Kiểm tra AI_BASE_URL và kết nối mạng.',
+        'Không thể kết nối tới nhà cung cấp AI. Kiểm tra Base URL và kết nối mạng.',
       );
     }
 
@@ -135,26 +141,23 @@ const defaultProvider: AiProvider = {
     return content;
   },
 
-  async *stream({ messages, temperature = 0.4, signal }) {
-    assertAiConfigured();
-    const url = `${env.aiBaseUrl}/chat/completions`;
+  async *stream({ messages, temperature = 0.4, signal, config: passedConfig }) {
+    const config = passedConfig ?? resolveEnvAiConfig();
+    assertAiConfigured(config);
+    const url = `${config.baseUrl}/chat/completions`;
     let response: Response;
     try {
       response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${env.aiApiKey}`,
-          'x-opencode-session': env.aiSessionId,
-        },
+        headers: buildAiRequestHeaders(config),
         body: JSON.stringify({
-          model: env.aiModel,
+          model: config.model,
           messages,
           temperature,
-          ...(env.aiReasoningEffort ? { reasoning_effort: env.aiReasoningEffort } : {}),
+          ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
           stream: true,
         }),
-        signal: combineSignals(env.aiTimeoutMs, signal),
+        signal: combineSignals(config.timeoutMs, signal),
       });
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
@@ -163,7 +166,7 @@ const defaultProvider: AiProvider = {
       throw new AppError(
         502,
         'AI_PROVIDER_ERROR',
-        'Không thể kết nối tới nhà cung cấp AI. Kiểm tra AI_BASE_URL và kết nối mạng.',
+        'Không thể kết nối tới nhà cung cấp AI. Kiểm tra Base URL và kết nối mạng.',
       );
     }
 
@@ -221,11 +224,42 @@ export function setAiProviderForTests(provider: AiProvider | null): void {
   activeProvider = provider ?? defaultProvider;
 }
 
-export function getAiStatus(): AiStatus {
+export async function getAiStatus(db: AppDb): Promise<AiStatus> {
+  const config = await resolveAiConfig(db);
   return {
-    enabled: env.aiEnabled,
-    model: env.aiModel,
-    baseUrl: env.aiBaseUrl,
+    enabled: config.enabled,
+    model: config.model,
+    baseUrl: config.baseUrl,
+  };
+}
+
+export async function testAiConnection(
+  db: AppDb,
+  draft?: AiTestRequest,
+  signal?: AbortSignal,
+): Promise<AiTestResponse> {
+  const current = await resolveAiConfig(db);
+  const config = mergeDraftAiConfig(current, draft);
+  assertAiConfigured(config);
+
+  const startedAt = Date.now();
+  const reply = await activeProvider.complete({
+    config,
+    messages: [
+      { role: 'system', content: 'You are a connectivity test endpoint. Reply concisely with OK.' },
+      { role: 'user', content: 'Ping' },
+    ],
+    jsonMode: false,
+    temperature: 0.1,
+    signal,
+  });
+
+  return {
+    ok: true,
+    latencyMs: Math.max(1, Date.now() - startedAt),
+    model: config.model,
+    baseUrl: config.baseUrl,
+    reply: reply.trim().slice(0, 120),
   };
 }
 
@@ -270,7 +304,8 @@ export async function reviewInterviewAnswer(
   db: AppDb,
   input: AiInterviewReviewRequest,
 ): Promise<AiInterviewReviewResponse> {
-  assertAiConfigured();
+  const config = await resolveAiConfig(db);
+  assertAiConfigured(config);
 
   const questionRows = await db
     .select()
@@ -323,6 +358,7 @@ export async function reviewInterviewAnswer(
   });
 
   const raw = await activeProvider.complete({
+    config,
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
@@ -365,7 +401,8 @@ export async function generateStudyPlan(
   db: AppDb,
   input: AiStudyPlanRequest,
 ): Promise<AiStudyPlanResponse> {
-  assertAiConfigured();
+  const config = await resolveAiConfig(db);
+  assertAiConfigured(config);
 
   const settings = serializeSettings(await getSettingsRow(db));
   const today = todayInTimezone(settings.timezone);
@@ -456,6 +493,7 @@ export async function generateStudyPlan(
   });
 
   const raw = await activeProvider.complete({
+    config,
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
@@ -567,9 +605,11 @@ export async function generateWeeklyCoaching(
   input: AiWeeklyCoachRequest,
   signal?: AbortSignal,
 ): Promise<AiWeeklyCoachResponse> {
-  assertAiConfigured();
+  const config = await resolveAiConfig(db);
+  assertAiConfigured(config);
   const messages = await buildCoachingMessages(db, input);
   const markdown = await activeProvider.complete({
+    config,
     messages,
     jsonMode: false,
     temperature: 0.4,
@@ -586,9 +626,11 @@ export async function* streamWeeklyCoaching(
   input: AiWeeklyCoachRequest,
   signal?: AbortSignal,
 ): AsyncGenerator<string, void, unknown> {
-  assertAiConfigured();
+  const config = await resolveAiConfig(db);
+  assertAiConfigured(config);
   const messages = await buildCoachingMessages(db, input);
   for await (const chunk of activeProvider.stream({
+    config,
     messages,
     temperature: 0.4,
     signal,

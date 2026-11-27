@@ -9,8 +9,10 @@ import { setAiProviderForTests } from './services/ai';
 import type { AppDb } from './db/client';
 import type {
   AiInterviewReviewResponse,
+  AiSettings,
   AiStatus,
   AiStudyPlanResponse,
+  AiTestResponse,
   AiWeeklyCoachResponse,
   AnalyticsData,
   CourseDetail,
@@ -525,6 +527,247 @@ describe('ai integration', () => {
       else process.env.AI_API_KEY = previousKey;
       if (previousModel === undefined) delete process.env.AI_MODEL;
       else process.env.AI_MODEL = previousModel;
+    }
+  });
+
+  it('allows configuring, testing, masking, preserving and resetting AI settings via UI API without leaking to export', async () => {
+    const previousKey = process.env.AI_API_KEY;
+    const previousBaseUrl = process.env.AI_BASE_URL;
+    const previousModel = process.env.AI_MODEL;
+    const previousReasoning = process.env.AI_REASONING_EFFORT;
+    const previousSessionId = process.env.AI_SESSION_ID;
+
+    delete process.env.AI_API_KEY;
+    process.env.AI_BASE_URL = 'https://api.openai.com/v1';
+    process.env.AI_MODEL = 'env-default-model';
+    process.env.AI_REASONING_EFFORT = 'max';
+    process.env.AI_SESSION_ID = 'ses_env_default';
+    resetAiRateLimitForTests();
+
+    try {
+      const initial = (await request(app).get('/api/ai/settings').expect(200)).body as AiSettings;
+      expect(initial.enabled).toBe(false);
+      expect(initial.hasCustomConfig).toBe(false);
+      expect(initial.apiKeySource).toBe('none');
+      expect(initial.hasApiKey).toBe(false);
+      expect(initial.maskedApiKey).toBeNull();
+      expect(initial.model).toBe('env-default-model');
+      expect(initial.reasoningEffort).toBe('max');
+      expect(initial.customHeaders).toEqual([
+        { key: 'x-opencode-session', value: 'ses_env_default' },
+      ]);
+
+      await request(app)
+        .patch('/api/ai/settings')
+        .send({ baseUrl: 'ftp://invalid.example.com' })
+        .expect(422);
+
+      await request(app)
+        .patch('/api/ai/settings')
+        .send({ timeoutMs: 250 })
+        .expect(422);
+
+      await request(app)
+        .patch('/api/ai/settings')
+        .send({ customHeaders: [{ key: 'Authorization', value: 'Bearer evil' }] })
+        .expect(422);
+
+      await request(app)
+        .patch('/api/ai/settings')
+        .send({
+          customHeaders: [
+            { key: 'X-Title', value: 'A' },
+            { key: 'x-title', value: 'B' },
+          ],
+        })
+        .expect(422);
+
+      await request(app)
+        .patch('/api/ai/settings')
+        .send({ customHeaders: [{ key: 'Bad Header!', value: 'val' }] })
+        .expect(422);
+
+      const saved = (
+        await request(app)
+          .patch('/api/ai/settings')
+          .send({
+            apiKey: 'sk-ui-secret-9999',
+            baseUrl: 'https://openrouter.ai/api/v1///',
+            model: 'openai/gpt-4o-mini',
+            reasoningEffort: '',
+            customHeaders: [
+              { key: 'x-opencode-session', value: 'ses_custom_session' },
+              { key: 'X-Title', value: 'Learning Road' },
+            ],
+            timeoutMs: 45000,
+          })
+          .expect(200)
+      ).body as AiSettings;
+
+      expect(saved.enabled).toBe(true);
+      expect(saved.hasCustomConfig).toBe(true);
+      expect(saved.apiKeySource).toBe('ui');
+      expect(saved.hasApiKey).toBe(true);
+      expect(saved.maskedApiKey).toBe('sk-u••••9999');
+      expect(JSON.stringify(saved)).not.toContain('sk-ui-secret-9999');
+      expect(saved.baseUrl).toBe('https://openrouter.ai/api/v1');
+      expect(saved.model).toBe('openai/gpt-4o-mini');
+      expect(saved.reasoningEffort).toBe('');
+      expect(saved.customHeaders).toEqual([
+        { key: 'x-opencode-session', value: 'ses_custom_session' },
+        { key: 'X-Title', value: 'Learning Road' },
+      ]);
+      expect(saved.timeoutMs).toBe(45000);
+      expect(saved.updatedAt).not.toBeNull();
+
+      const statusAfterSave = (await request(app).get('/api/ai/status').expect(200))
+        .body as AiStatus;
+      expect(statusAfterSave).toEqual({
+        enabled: true,
+        model: 'openai/gpt-4o-mini',
+        baseUrl: 'https://openrouter.ai/api/v1',
+      });
+
+      const exported = (await request(app).get('/api/export').expect(200)).body as ExportPayload;
+      expect(JSON.stringify(exported)).not.toContain('sk-ui-secret-9999');
+
+      // Updating model without sending apiKey preserves the stored UI key and custom headers
+      const updatedModel = (
+        await request(app)
+          .patch('/api/ai/settings')
+          .send({ model: 'google/gemini-2.5-flash' })
+          .expect(200)
+      ).body as AiSettings;
+      expect(updatedModel.enabled).toBe(true);
+      expect(updatedModel.apiKeySource).toBe('ui');
+      expect(updatedModel.maskedApiKey).toBe('sk-u••••9999');
+      expect(updatedModel.model).toBe('google/gemini-2.5-flash');
+      expect(updatedModel.reasoningEffort).toBe('');
+      expect(updatedModel.customHeaders).toEqual([
+        { key: 'x-opencode-session', value: 'ses_custom_session' },
+        { key: 'X-Title', value: 'Learning Road' },
+      ]);
+
+      const capturedConfigs: Array<{
+        apiKey: string;
+        baseUrl: string;
+        model: string;
+        reasoningEffort: string;
+        customHeaders: Array<{ key: string; value: string }>;
+        timeoutMs: number;
+      }> = [];
+
+      setAiProviderForTests({
+        async complete({ config }) {
+          if (config) {
+            capturedConfigs.push({
+              apiKey: config.apiKey,
+              baseUrl: config.baseUrl,
+              model: config.model,
+              reasoningEffort: config.reasoningEffort,
+              customHeaders: config.customHeaders,
+              timeoutMs: config.timeoutMs,
+            });
+          }
+          return 'OK';
+        },
+        async *stream() {
+          yield 'OK';
+        },
+      });
+
+      // Test saved config
+      const testSaved = (await request(app).post('/api/ai/test').send({}).expect(200))
+        .body as AiTestResponse;
+      expect(testSaved.ok).toBe(true);
+      expect(testSaved.model).toBe('google/gemini-2.5-flash');
+      expect(testSaved.baseUrl).toBe('https://openrouter.ai/api/v1');
+      expect(capturedConfigs[0]).toEqual({
+        apiKey: 'sk-ui-secret-9999',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        model: 'google/gemini-2.5-flash',
+        reasoningEffort: '',
+        customHeaders: [
+          { key: 'x-opencode-session', value: 'ses_custom_session' },
+          { key: 'X-Title', value: 'Learning Road' },
+        ],
+        timeoutMs: 45000,
+      });
+
+      // Test unsaved draft config with custom headers without mutating stored settings
+      const testDraft = (
+        await request(app)
+          .post('/api/ai/test')
+          .send({
+            apiKey: 'sk-draft-key-7777',
+            baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+            model: 'gemini-2.5-pro',
+            reasoningEffort: 'low',
+            customHeaders: [{ key: 'HTTP-Referer', value: 'http://localhost:3000' }],
+            timeoutMs: 15000,
+          })
+          .expect(200)
+      ).body as AiTestResponse;
+      expect(testDraft.ok).toBe(true);
+      expect(testDraft.model).toBe('gemini-2.5-pro');
+      expect(testDraft.baseUrl).toBe('https://generativelanguage.googleapis.com/v1beta/openai');
+      expect(capturedConfigs[1]).toEqual({
+        apiKey: 'sk-draft-key-7777',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+        model: 'gemini-2.5-pro',
+        reasoningEffort: 'low',
+        customHeaders: [{ key: 'HTTP-Referer', value: 'http://localhost:3000' }],
+        timeoutMs: 15000,
+      });
+
+      // Clearing customHeaders explicitly overrides env default to empty list
+      const clearedHeaders = (
+        await request(app).patch('/api/ai/settings').send({ customHeaders: [] }).expect(200)
+      ).body as AiSettings;
+      expect(clearedHeaders.customHeaders).toEqual([]);
+
+      // Clearing only the UI API key disables AI when .env has no key
+      const clearedKey = (
+        await request(app).patch('/api/ai/settings').send({ apiKey: null }).expect(200)
+      ).body as AiSettings;
+      expect(clearedKey.enabled).toBe(false);
+      expect(clearedKey.apiKeySource).toBe('none');
+      expect(clearedKey.maskedApiKey).toBeNull();
+      expect(clearedKey.model).toBe('google/gemini-2.5-flash');
+
+      // When .env provides a key, clearing UI key falls back to .env
+      process.env.AI_API_KEY = 'sk-env-fallback-1111';
+      const fallbackToEnvKey = (await request(app).get('/api/ai/settings').expect(200))
+        .body as AiSettings;
+      expect(fallbackToEnvKey.enabled).toBe(true);
+      expect(fallbackToEnvKey.apiKeySource).toBe('env');
+      expect(fallbackToEnvKey.maskedApiKey).toBe('sk-e••••1111');
+      expect(fallbackToEnvKey.model).toBe('google/gemini-2.5-flash');
+
+      // Resetting reverts everything back to .env defaults
+      const reset = (await request(app).delete('/api/ai/settings').expect(200)).body as AiSettings;
+      expect(reset.hasCustomConfig).toBe(false);
+      expect(reset.enabled).toBe(true);
+      expect(reset.apiKeySource).toBe('env');
+      expect(reset.baseUrl).toBe('https://api.openai.com/v1');
+      expect(reset.model).toBe('env-default-model');
+      expect(reset.reasoningEffort).toBe('max');
+      expect(reset.customHeaders).toEqual([
+        { key: 'x-opencode-session', value: 'ses_env_default' },
+      ]);
+    } finally {
+      setAiProviderForTests(null);
+      await request(app).delete('/api/ai/settings');
+      if (previousKey === undefined) delete process.env.AI_API_KEY;
+      else process.env.AI_API_KEY = previousKey;
+      if (previousBaseUrl === undefined) delete process.env.AI_BASE_URL;
+      else process.env.AI_BASE_URL = previousBaseUrl;
+      if (previousModel === undefined) delete process.env.AI_MODEL;
+      else process.env.AI_MODEL = previousModel;
+      if (previousReasoning === undefined) delete process.env.AI_REASONING_EFFORT;
+      else process.env.AI_REASONING_EFFORT = previousReasoning;
+      if (previousSessionId === undefined) delete process.env.AI_SESSION_ID;
+      else process.env.AI_SESSION_ID = previousSessionId;
     }
   });
 

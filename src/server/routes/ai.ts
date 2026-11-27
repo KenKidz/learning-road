@@ -1,16 +1,25 @@
 import { Router, type Request } from 'express';
 import { z } from 'zod';
 import type { AppDb } from '../db/client';
-import { env } from '../env';
 import { asyncHandler } from '../lib/async-handler';
 import { AppError } from '../lib/errors';
 import { parseInput } from '../lib/validate';
 import {
+  AI_HEADER_NAME_PATTERN,
+  RESERVED_AI_HEADER_NAMES,
+  getAiSettings,
+  resetAiSettings,
+  resolveAiConfig,
+  updateAiSettings,
+} from '../services/ai-settings';
+import {
+  assertAiConfigured,
   generateStudyPlan,
   generateWeeklyCoaching,
   getAiStatus,
   reviewInterviewAnswer,
   streamWeeklyCoaching,
+  testAiConnection,
 } from '../services/ai';
 
 const WINDOW_MS = 5 * 60 * 1000;
@@ -74,12 +83,126 @@ const weeklyCoachRequestSchema = z
   })
   .strict();
 
+const httpUrlSchema = z
+  .string()
+  .trim()
+  .min(1, 'Base URL không được để trống.')
+  .max(2048)
+  .refine((value) => {
+    try {
+      const parsed = new URL(value);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }, 'Base URL phải là đường dẫn http:// hoặc https:// hợp lệ.');
+
+const customHeaderSchema = z
+  .object({
+    key: z
+      .string()
+      .trim()
+      .min(1, 'Tên header không được để trống.')
+      .max(100, 'Tên header quá dài (tối đa 100 ký tự).')
+      .refine(
+        (value) => AI_HEADER_NAME_PATTERN.test(value),
+        'Tên header chỉ được chứa chữ cái, số, dấu gạch ngang (-) hoặc gạch dưới (_).',
+      )
+      .refine(
+        (value) => !RESERVED_AI_HEADER_NAMES.has(value.toLowerCase()),
+        'Không thể ghi đè header hệ thống (Authorization, Content-Type, Host…).',
+      ),
+    value: z
+      .string()
+      .trim()
+      .min(1, 'Giá trị header không được để trống.')
+      .max(1000, 'Giá trị header quá dài (tối đa 1000 ký tự).')
+      .refine((value) => !/[\r\n]/.test(value), 'Giá trị header không được chứa ký tự xuống dòng.'),
+  })
+  .strict();
+
+const customHeadersArraySchema = z
+  .array(customHeaderSchema)
+  .max(20, 'Tối đa 20 custom header.')
+  .refine((headers) => {
+    const seen = new Set<string>();
+    for (const item of headers) {
+      const lower = item.key.toLowerCase();
+      if (seen.has(lower)) return false;
+      seen.add(lower);
+    }
+    return true;
+  }, 'Tên header không được trùng lặp.');
+
+const aiSettingsUpdateSchema = z
+  .object({
+    apiKey: z.string().trim().max(500).nullable().optional(),
+    baseUrl: httpUrlSchema.optional(),
+    model: z.string().trim().min(1, 'Model không được để trống.').max(200).optional(),
+    reasoningEffort: z.string().trim().max(50).optional(),
+    customHeaders: customHeadersArraySchema.optional(),
+    timeoutMs: z.number().int().min(1000).max(300000).optional(),
+  })
+  .strict();
+
+const aiTestRequestSchema = z
+  .object({
+    apiKey: z.string().trim().max(500).optional(),
+    baseUrl: httpUrlSchema.optional(),
+    model: z.string().trim().min(1, 'Model không được để trống.').max(200).optional(),
+    reasoningEffort: z.string().trim().max(50).optional(),
+    customHeaders: customHeadersArraySchema.optional(),
+    timeoutMs: z.number().int().min(1000).max(300000).optional(),
+  })
+  .strict();
+
 export function aiRouter(db: AppDb): Router {
   const router = Router();
 
-  router.get('/status', (_req, res) => {
-    res.json(getAiStatus());
-  });
+  router.get(
+    '/status',
+    asyncHandler(async (_req, res) => {
+      res.json(await getAiStatus(db));
+    }),
+  );
+
+  router.get(
+    '/settings',
+    asyncHandler(async (_req, res) => {
+      res.json(await getAiSettings(db));
+    }),
+  );
+
+  router.patch(
+    '/settings',
+    asyncHandler(async (req, res) => {
+      const input = parseInput(aiSettingsUpdateSchema, req.body);
+      res.json(await updateAiSettings(db, input));
+    }),
+  );
+
+  router.delete(
+    '/settings',
+    asyncHandler(async (_req, res) => {
+      res.json(await resetAiSettings(db));
+    }),
+  );
+
+  router.post(
+    '/test',
+    asyncHandler(async (req, res) => {
+      checkAiRateLimit(req);
+      const input = parseInput(aiTestRequestSchema, req.body ?? {});
+      const abortController = new AbortController();
+      res.on('close', () => {
+        if (!res.writableEnded) {
+          abortController.abort();
+        }
+      });
+      const result = await testAiConnection(db, input, abortController.signal);
+      res.json(result);
+    }),
+  );
 
   router.post(
     '/interview-review',
@@ -107,13 +230,8 @@ export function aiRouter(db: AppDb): Router {
       checkAiRateLimit(req);
       const input = parseInput(weeklyCoachRequestSchema, req.body ?? {});
 
-      if (!env.aiEnabled) {
-        throw new AppError(
-          503,
-          'AI_NOT_CONFIGURED',
-          'Tính năng AI chưa được cấu hình. Hãy thêm AI_API_KEY vào file .env ở server.',
-        );
-      }
+      const config = await resolveAiConfig(db);
+      assertAiConfigured(config);
 
       const abortController = new AbortController();
       res.on('close', () => {

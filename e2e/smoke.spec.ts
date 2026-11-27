@@ -113,5 +113,40 @@ test.describe('Learning Road E2E smoke flows', () => {
     const previewModal = page.getByRole('dialog');
     await expect(previewModal).toBeVisible();
     await expect(previewModal.getByRole('button', { name: /Import & Gộp|Import & Merge/i })).toBeVisible();
+    await previewModal.getByRole('button', { name: /Hủy|Cancel/i }).click();
+
+    const aiSection = page.locator('#ai-settings');
+    await expect(aiSection).toBeVisible();
+    await aiSection.getByRole('button', { name: 'Google Gemini' }).click();
+    await expect(aiSection.locator('#ai-base-url')).toHaveValue(
+      'https://generativelanguage.googleapis.com/v1beta/openai',
+    );
+    await aiSection.locator('#ai-api-key').fill('sk-e2e-test-4321');
+    await aiSection.locator('#ai-model').fill('gemini-2.5-flash');
+    while ((await aiSection.locator('.ai-header-row').count()) > 0) {
+      await aiSection.locator('.ai-header-row').first().locator('button').click();
+    }
+    await aiSection.getByRole('button', { name: /Thêm header|Add header/i }).click();
+    const headerRow = aiSection.locator('.ai-header-row').last();
+    await headerRow.locator('input').nth(0).fill('x-opencode-session');
+    await headerRow.locator('input').nth(1).fill('ses_e2e_header_01');
+    await aiSection.getByRole('button', { name: /Lưu cấu hình AI|Save AI settings/i }).click();
+
+    await expect(aiSection.getByText('sk-e••••4321')).toBeVisible();
+    await page.reload();
+    await expect(page.locator('#ai-settings').getByText('sk-e••••4321')).toBeVisible();
+    await expect(page.locator('#ai-settings #ai-model')).toHaveValue('gemini-2.5-flash');
+    await expect(page.locator('#ai-settings .ai-header-row').last().locator('input').nth(0)).toHaveValue(
+      'x-opencode-session',
+    );
+    await expect(page.locator('#ai-settings .ai-header-row').last().locator('input').nth(1)).toHaveValue(
+      'ses_e2e_header_01',
+    );
+
+    await page.locator('#ai-settings').getByRole('button', { name: /Đặt lại theo \.env|Reset to \.env/i }).click();
+    const resetModal = page.getByRole('dialog');
+    await expect(resetModal).toBeVisible();
+    await resetModal.getByRole('button', { name: /Đặt lại theo \.env|Reset to \.env/i }).click();
+    await expect(page.locator('#ai-settings').getByText('sk-e••••4321')).toHaveCount(0);
   });
 });

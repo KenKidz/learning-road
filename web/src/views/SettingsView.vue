@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useRoute } from 'vue-router';
 import type {
+  AiCustomHeader,
+  AiSettings,
   AiStatus,
+  AiTestResponse,
   AuthStatus,
   ExportPayload,
   ImportMode,
@@ -13,21 +17,30 @@ import type {
 import { api, ApiError, downloadExport } from '../lib/api';
 import { formatDateTime, todayInTimezone } from '../lib/format';
 import { useToast } from '../composables/useToast';
+import { confirmAction } from '../composables/useConfirm';
 import PageHeader from '../components/PageHeader.vue';
 import EmptyState from '../components/EmptyState.vue';
 import BaseModal from '../components/BaseModal.vue';
 import Icon from '../components/Icon.vue';
 
+const route = useRoute();
 const toast = useToast();
 const { t } = useI18n();
 
 const settings = ref<UserSettings | null>(null);
 const authStatus = ref<AuthStatus | null>(null);
 const aiStatus = ref<AiStatus | null>(null);
+const aiSettings = ref<AiSettings | null>(null);
 const loading = ref(true);
 const error = ref('');
 const saving = ref(false);
 const formError = ref('');
+const aiSaving = ref(false);
+const aiTesting = ref(false);
+const aiResetting = ref(false);
+const aiFormError = ref('');
+const aiTestResult = ref<AiTestResponse | null>(null);
+const showApiKey = ref(false);
 const exporting = ref(false);
 const importing = ref(false);
 const importedSummary = ref<ImportResult | null>(null);
@@ -35,6 +48,71 @@ const showImportModal = ref(false);
 const pendingImportPayload = ref<ExportPayload | null>(null);
 const importPreview = ref<ImportPreviewResult | null>(null);
 const importMode = ref<ImportMode>('merge');
+
+const aiPresets = [
+  {
+    id: 'openai',
+    label: 'OpenAI',
+    baseUrl: 'https://api.openai.com/v1',
+    defaultModel: 'gpt-4o-mini',
+  },
+  {
+    id: 'gemini',
+    label: 'Google Gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    defaultModel: 'gemini-2.5-flash',
+  },
+  {
+    id: 'openrouter',
+    label: 'OpenRouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    defaultModel: 'openai/gpt-4o-mini',
+  },
+  {
+    id: 'opencode',
+    label: 'OpenCode Go',
+    baseUrl: 'https://opencode.ai/inference/go/v1',
+    defaultModel: 'gpt-6-luna',
+  },
+  {
+    id: 'kilo',
+    label: 'Kilo Gateway',
+    baseUrl: 'https://api.kilo.ai/api/openrouter',
+    defaultModel: 'openai/gpt-4o-mini',
+  },
+  {
+    id: 'ollama',
+    label: 'Ollama (Local)',
+    baseUrl: 'http://localhost:11434/v1',
+    defaultModel: 'llama3.2',
+  },
+] as const;
+
+const reasoningEffortOptions = ['minimal', 'low', 'medium', 'high', 'max'];
+const commonHeaderKeys = [
+  'x-opencode-session',
+  'HTTP-Referer',
+  'X-Title',
+  'OpenAI-Organization',
+  'OpenAI-Project',
+];
+const reservedHeaderNames = new Set([
+  'authorization',
+  'content-type',
+  'host',
+  'content-length',
+  'transfer-encoding',
+  'connection',
+]);
+const headerKeyPattern = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+
+interface EditableHeaderRow {
+  id: number;
+  key: string;
+  value: string;
+}
+
+let nextHeaderRowId = 1;
 
 const weekDayOrder = [1, 2, 3, 4, 5, 6, 0];
 
@@ -99,6 +177,20 @@ const form = reactive({
   gitLevel: '',
 });
 
+const aiForm = reactive({
+  baseUrl: '',
+  apiKey: '',
+  model: '',
+  reasoningEffort: '',
+  customHeaders: [] as EditableHeaderRow[],
+  timeoutMs: '30000',
+});
+
+const activePresetId = computed(() => {
+  const normalized = aiForm.baseUrl.trim().replace(/\/+$/, '');
+  return aiPresets.find((preset) => preset.baseUrl === normalized)?.id ?? null;
+});
+
 const todayLabel = ref('');
 
 function populate(data: UserSettings) {
@@ -118,23 +210,221 @@ function populate(data: UserSettings) {
   todayLabel.value = todayInTimezone(data.timezone);
 }
 
+function populateAi(data: AiSettings) {
+  aiSettings.value = data;
+  aiStatus.value = {
+    enabled: data.enabled,
+    model: data.model,
+    baseUrl: data.baseUrl,
+  };
+  aiForm.baseUrl = data.baseUrl;
+  aiForm.apiKey = '';
+  aiForm.model = data.model;
+  aiForm.reasoningEffort = data.reasoningEffort;
+  aiForm.customHeaders = data.customHeaders.map((header) => ({
+    id: nextHeaderRowId++,
+    key: header.key,
+    value: header.value,
+  }));
+  aiForm.timeoutMs = String(data.timeoutMs);
+  showApiKey.value = false;
+}
+
+async function addCustomHeader() {
+  if (aiForm.customHeaders.length >= 20) return;
+  const id = nextHeaderRowId++;
+  aiForm.customHeaders.push({ id, key: '', value: '' });
+  aiFormError.value = '';
+  aiTestResult.value = null;
+  await nextTick();
+  document.getElementById(`ai-header-key-${id}`)?.focus();
+}
+
+function removeCustomHeader(id: number) {
+  aiForm.customHeaders = aiForm.customHeaders.filter((row) => row.id !== id);
+  aiFormError.value = '';
+  aiTestResult.value = null;
+}
+
+function applyAiPreset(preset: (typeof aiPresets)[number]) {
+  const knownDefaults = new Set<string>(aiPresets.map((item) => item.defaultModel));
+  aiForm.baseUrl = preset.baseUrl;
+  if (!aiForm.model.trim() || knownDefaults.has(aiForm.model.trim())) {
+    aiForm.model = preset.defaultModel;
+  }
+  aiFormError.value = '';
+  aiTestResult.value = null;
+}
+
+function validateAiForm(): {
+  baseUrl: string;
+  model: string;
+  timeoutMs: number;
+  customHeaders: AiCustomHeader[];
+} | null {
+  aiFormError.value = '';
+  const baseUrl = aiForm.baseUrl.trim().replace(/\/+$/, '');
+  let validUrl = false;
+  try {
+    const parsed = new URL(baseUrl);
+    validUrl = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    validUrl = false;
+  }
+  if (!baseUrl || !validUrl) {
+    aiFormError.value = t('ai.invalidBaseUrl');
+    return null;
+  }
+
+  const model = aiForm.model.trim();
+  if (!model) {
+    aiFormError.value = t('ai.invalidModel');
+    return null;
+  }
+
+  const timeoutMs = Number(aiForm.timeoutMs);
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 300000) {
+    aiFormError.value = t('ai.invalidTimeout');
+    return null;
+  }
+
+  const customHeaders: AiCustomHeader[] = [];
+  const seenKeys = new Set<string>();
+  for (const row of aiForm.customHeaders) {
+    const key = row.key.trim();
+    const value = row.value.trim();
+    if (!key && !value) continue;
+    if (!key || !value) {
+      aiFormError.value = t('ai.invalidHeaderRow');
+      return null;
+    }
+    if (!headerKeyPattern.test(key)) {
+      aiFormError.value = t('ai.invalidHeaderKey', { key });
+      return null;
+    }
+    const lower = key.toLowerCase();
+    if (reservedHeaderNames.has(lower)) {
+      aiFormError.value = t('ai.reservedHeaderKey', { key });
+      return null;
+    }
+    if (seenKeys.has(lower)) {
+      aiFormError.value = t('ai.duplicateHeaderKey', { key });
+      return null;
+    }
+    if (/[\r\n]/.test(value)) {
+      aiFormError.value = t('ai.invalidHeaderValue', { key });
+      return null;
+    }
+    seenKeys.add(lower);
+    customHeaders.push({ key, value });
+  }
+
+  return { baseUrl, model, timeoutMs, customHeaders };
+}
+
+async function saveAiSettings() {
+  const validated = validateAiForm();
+  if (!validated) return;
+  aiSaving.value = true;
+  aiTestResult.value = null;
+  try {
+    const updated = await api.updateAiSettings({
+      baseUrl: validated.baseUrl,
+      model: validated.model,
+      reasoningEffort: aiForm.reasoningEffort.trim(),
+      customHeaders: validated.customHeaders,
+      timeoutMs: validated.timeoutMs,
+      ...(aiForm.apiKey.trim() ? { apiKey: aiForm.apiKey.trim() } : {}),
+    });
+    populateAi(updated);
+    toast.success(t('ai.settingsSaved'));
+  } catch (err) {
+    aiFormError.value = err instanceof ApiError ? err.message : t('errors.unexpected');
+  } finally {
+    aiSaving.value = false;
+  }
+}
+
+async function clearSavedApiKey() {
+  aiSaving.value = true;
+  aiFormError.value = '';
+  aiTestResult.value = null;
+  try {
+    const updated = await api.updateAiSettings({ apiKey: null });
+    populateAi(updated);
+    toast.success(t('ai.apiKeyCleared'));
+  } catch (err) {
+    aiFormError.value = err instanceof ApiError ? err.message : t('errors.unexpected');
+  } finally {
+    aiSaving.value = false;
+  }
+}
+
+async function testAi() {
+  const validated = validateAiForm();
+  if (!validated) return;
+  aiTesting.value = true;
+  aiTestResult.value = null;
+  try {
+    const result = await api.testAiConnection({
+      baseUrl: validated.baseUrl,
+      model: validated.model,
+      reasoningEffort: aiForm.reasoningEffort.trim(),
+      customHeaders: validated.customHeaders,
+      timeoutMs: validated.timeoutMs,
+      ...(aiForm.apiKey.trim() ? { apiKey: aiForm.apiKey.trim() } : {}),
+    });
+    aiTestResult.value = result;
+    toast.success(t('ai.testSuccessToast', { latency: result.latencyMs }));
+  } catch (err) {
+    aiFormError.value = err instanceof ApiError ? err.message : t('errors.unexpected');
+  } finally {
+    aiTesting.value = false;
+  }
+}
+
+async function resetAiToEnv() {
+  const confirmed = await confirmAction({
+    title: t('ai.resetConfirmTitle'),
+    message: t('ai.resetConfirmText'),
+    confirmLabel: t('ai.resetToEnv'),
+  });
+  if (!confirmed) return;
+  aiResetting.value = true;
+  aiFormError.value = '';
+  aiTestResult.value = null;
+  try {
+    const reset = await api.resetAiSettings();
+    populateAi(reset);
+    toast.success(t('ai.settingsReset'));
+  } catch (err) {
+    aiFormError.value = err instanceof ApiError ? err.message : t('errors.unexpected');
+  } finally {
+    aiResetting.value = false;
+  }
+}
+
 async function load() {
   loading.value = true;
   error.value = '';
   try {
-    const [settingsResponse, authResponse, aiResponse] = await Promise.all([
+    const [settingsResponse, authResponse, aiSettingsResponse] = await Promise.all([
       api.settings(),
       api.authStatus(),
-      api.aiStatus(),
+      api.aiSettings(),
     ]);
     settings.value = settingsResponse;
     authStatus.value = authResponse;
-    aiStatus.value = aiResponse;
     populate(settingsResponse);
+    populateAi(aiSettingsResponse);
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : t('errors.settingsLoad');
   } finally {
     loading.value = false;
+    if (route.hash === '#ai-settings') {
+      await nextTick();
+      document.getElementById('ai-settings')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   }
 }
 
@@ -438,6 +728,298 @@ onMounted(load);
           </button>
         </div>
       </section>
+    </form>
+
+    <form v-if="aiSettings" id="ai-settings" class="card stack" @submit.prevent="saveAiSettings">
+      <div class="card-head">
+        <div>
+          <div class="row wrap" style="gap: 8px">
+            <h2 class="card-title">
+              <Icon name="sparkles" :size="16" class="text-info" />
+              {{ $t('ai.settingsTitle') }}
+            </h2>
+            <span class="badge" :class="aiSettings.enabled ? 'badge-success' : 'badge-neutral'">
+              {{
+                aiSettings.enabled
+                  ? $t('ai.statusConnected', { model: aiSettings.model })
+                  : $t('ai.statusDisabled')
+              }}
+            </span>
+            <span
+              class="badge"
+              :class="aiSettings.hasCustomConfig ? 'badge-info' : 'badge-outline'"
+            >
+              {{ aiSettings.hasCustomConfig ? $t('ai.sourceUi') : $t('ai.sourceEnv') }}
+            </span>
+          </div>
+          <p class="card-hint">
+            {{ $t('ai.settingsHint') }}
+          </p>
+        </div>
+      </div>
+
+      <div class="field">
+        <span class="field-label">{{ $t('ai.presetsLabel') }}</span>
+        <div class="pill-group" role="group" :aria-label="$t('ai.presetsLabel')">
+          <button
+            v-for="preset in aiPresets"
+            :key="preset.id"
+            type="button"
+            class="pill-btn"
+            :class="{ active: activePresetId === preset.id }"
+            :aria-pressed="activePresetId === preset.id"
+            @click="applyAiPreset(preset)"
+          >
+            {{ preset.label }}
+          </button>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="field span-2">
+          <label class="field-label" for="ai-base-url">{{ $t('ai.baseUrlLabel') }}</label>
+          <input
+            id="ai-base-url"
+            v-model="aiForm.baseUrl"
+            class="input mono"
+            type="url"
+            spellcheck="false"
+            autocomplete="off"
+            :placeholder="$t('ai.baseUrlPlaceholder')"
+            required
+          />
+          <span class="field-hint">{{ $t('ai.baseUrlHint') }}</span>
+        </div>
+
+        <div class="field span-2">
+          <div class="row-between wrap" style="gap: 8px">
+            <label class="field-label" for="ai-api-key">{{ $t('ai.apiKeyLabel') }}</label>
+            <div class="row wrap" style="gap: 8px">
+              <span
+                class="badge"
+                :class="
+                  aiSettings.apiKeySource === 'ui'
+                    ? 'badge-info'
+                    : aiSettings.apiKeySource === 'env'
+                      ? 'badge-success'
+                      : 'badge-neutral'
+                "
+              >
+                {{
+                  aiSettings.apiKeySource === 'ui'
+                    ? $t('ai.apiKeySourceUi', { masked: aiSettings.maskedApiKey })
+                    : aiSettings.apiKeySource === 'env'
+                      ? $t('ai.apiKeySourceEnv', { masked: aiSettings.maskedApiKey })
+                      : $t('ai.apiKeySourceNone')
+                }}
+              </span>
+              <button
+                v-if="aiSettings.apiKeySource === 'ui'"
+                type="button"
+                class="link-btn danger"
+                :disabled="aiSaving || aiTesting || aiResetting"
+                @click="clearSavedApiKey"
+              >
+                {{ $t('ai.clearSavedApiKey') }}
+              </button>
+            </div>
+          </div>
+          <div class="input-wrap">
+            <input
+              id="ai-api-key"
+              v-model="aiForm.apiKey"
+              class="input input-has-right mono"
+              :type="showApiKey ? 'text' : 'password'"
+              autocomplete="new-password"
+              spellcheck="false"
+              :placeholder="
+                aiSettings.hasApiKey ? $t('ai.apiKeyPlaceholderKeep') : $t('ai.apiKeyPlaceholderNew')
+              "
+            />
+            <button
+              type="button"
+              class="input-action-right"
+              :aria-label="showApiKey ? $t('ai.hideApiKey') : $t('ai.showApiKey')"
+              @click="showApiKey = !showApiKey"
+            >
+              <Icon :name="showApiKey ? 'eye-off' : 'eye'" :size="16" />
+            </button>
+          </div>
+          <span class="field-hint">{{ $t('ai.apiKeyHint') }}</span>
+        </div>
+
+        <div class="field span-2">
+          <label class="field-label" for="ai-model">{{ $t('ai.modelLabel') }}</label>
+          <input
+            id="ai-model"
+            v-model="aiForm.model"
+            class="input mono"
+            type="text"
+            spellcheck="false"
+            autocomplete="off"
+            :placeholder="$t('ai.modelPlaceholder')"
+            required
+          />
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="ai-reasoning-effort">
+            {{ $t('ai.reasoningEffortLabel') }}
+          </label>
+          <input
+            id="ai-reasoning-effort"
+            v-model="aiForm.reasoningEffort"
+            class="input mono"
+            list="ai-reasoning-list"
+            autocomplete="off"
+            spellcheck="false"
+            :placeholder="$t('ai.reasoningEffortPlaceholder')"
+          />
+          <datalist id="ai-reasoning-list">
+            <option v-for="effort in reasoningEffortOptions" :key="effort" :value="effort" />
+          </datalist>
+          <span class="field-hint">{{ $t('ai.reasoningEffortHint') }}</span>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="ai-timeout">{{ $t('ai.timeoutLabel') }}</label>
+          <input
+            id="ai-timeout"
+            v-model="aiForm.timeoutMs"
+            class="input tabular"
+            type="number"
+            min="1000"
+            max="300000"
+            step="1000"
+          />
+          <span class="field-hint">
+            {{ $t('ai.timeoutHint', { ms: aiSettings.envDefaults.timeoutMs }) }}
+          </span>
+        </div>
+      </div>
+
+      <div class="ai-headers-box stack-sm">
+        <div class="row-between wrap" style="gap: 8px">
+          <div class="row wrap" style="gap: 8px">
+            <span class="field-label">{{ $t('ai.customHeadersTitle') }}</span>
+            <span v-if="aiForm.customHeaders.length" class="badge badge-neutral tabular">
+              {{ aiForm.customHeaders.length }}
+            </span>
+          </div>
+          <button
+            type="button"
+            class="btn btn-sm"
+            :disabled="aiForm.customHeaders.length >= 20 || aiSaving || aiTesting || aiResetting"
+            @click="addCustomHeader"
+          >
+            <Icon name="plus" :size="14" />
+            {{ $t('ai.addHeader') }}
+          </button>
+        </div>
+
+        <p class="field-hint">{{ $t('ai.customHeadersHint') }}</p>
+
+        <datalist id="ai-header-key-list">
+          <option v-for="headerKey in commonHeaderKeys" :key="headerKey" :value="headerKey" />
+        </datalist>
+
+        <div v-if="aiForm.customHeaders.length" class="stack-sm">
+          <div
+            v-for="(header, index) in aiForm.customHeaders"
+            :key="header.id"
+            class="ai-header-row"
+          >
+            <input
+              :id="`ai-header-key-${header.id}`"
+              v-model="header.key"
+              class="input input-sm mono"
+              type="text"
+              list="ai-header-key-list"
+              autocomplete="off"
+              spellcheck="false"
+              :aria-label="$t('ai.headerKeyAria', { index: index + 1 })"
+              :placeholder="$t('ai.headerKeyPlaceholder')"
+            />
+            <input
+              :id="`ai-header-value-${header.id}`"
+              v-model="header.value"
+              class="input input-sm mono"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              :aria-label="$t('ai.headerValueAria', { index: index + 1 })"
+              :placeholder="$t('ai.headerValuePlaceholder')"
+            />
+            <button
+              type="button"
+              class="btn btn-ghost btn-icon btn-sm btn-danger-hover"
+              :aria-label="$t('ai.removeHeaderAria', { key: header.key || index + 1 })"
+              :title="$t('common.delete')"
+              @click="removeCustomHeader(header.id)"
+            >
+              <Icon name="trash" :size="15" />
+            </button>
+          </div>
+        </div>
+        <p v-else class="field-hint muted">
+          {{ $t('ai.customHeadersEmpty') }}
+        </p>
+      </div>
+
+      <div v-if="aiTestResult" class="alert alert-success">
+        <Icon name="check-circle" :size="18" />
+        <div class="alert-body">
+          <strong>{{ $t('ai.testSuccessTitle', { latency: aiTestResult.latencyMs }) }}</strong>
+          {{
+            $t('ai.testSuccessDetail', {
+              model: aiTestResult.model,
+              baseUrl: aiTestResult.baseUrl,
+            })
+          }}
+        </div>
+      </div>
+
+      <p v-if="aiFormError" class="form-error">{{ aiFormError }}</p>
+
+      <div class="row-between wrap" style="gap: 10px">
+        <div class="row wrap" style="gap: 10px">
+          <button
+            v-if="aiSettings.hasCustomConfig"
+            type="button"
+            class="btn btn-ghost btn-sm"
+            :disabled="aiSaving || aiTesting || aiResetting"
+            @click="resetAiToEnv"
+          >
+            <span v-if="aiResetting" class="spinner" />
+            <Icon v-else name="refresh" :size="14" />
+            {{ $t('ai.resetToEnv') }}
+          </button>
+          <span v-if="aiSettings.updatedAt" class="field-hint">
+            {{ $t('ai.updatedAtLabel', { date: formatDateTime(aiSettings.updatedAt) }) }}
+          </span>
+        </div>
+
+        <div class="row wrap" style="gap: 8px">
+          <button
+            type="button"
+            class="btn"
+            :disabled="aiSaving || aiTesting || aiResetting"
+            @click="testAi"
+          >
+            <span v-if="aiTesting" class="spinner" />
+            <Icon v-else name="sparkles" :size="15" />
+            {{ aiTesting ? $t('ai.testingConnection') : $t('ai.testConnection') }}
+          </button>
+          <button
+            type="submit"
+            class="btn btn-primary"
+            :disabled="aiSaving || aiTesting || aiResetting"
+          >
+            <span v-if="aiSaving" class="spinner" />
+            {{ $t('ai.saveSettings') }}
+          </button>
+        </div>
+      </div>
     </form>
 
     <div class="grid cols-2">

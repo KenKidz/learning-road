@@ -432,9 +432,12 @@ onMounted(() => {
         </button>
       </form>
 
-      <p v-if="aiStatus && !aiStatus.enabled" class="field-hint mt-8">
-        {{ $t('ai.notConfiguredHint') }}
-      </p>
+      <div v-if="aiStatus && !aiStatus.enabled" class="row wrap mt-8" style="gap: 8px">
+        <p class="field-hint">{{ $t('ai.notConfiguredHint') }}</p>
+        <RouterLink to="/settings#ai-settings" class="link-btn">
+          {{ $t('ai.openSettingsCta') }} →
+        </RouterLink>
+      </div>
       <p v-if="coachError" class="form-error mt-8">{{ coachError }}</p>
 
       <div v-if="coachMarkdown || coachStreaming" class="feature-card mt-16">

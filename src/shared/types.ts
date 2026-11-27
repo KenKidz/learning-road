@@ -487,10 +487,65 @@ export interface AnalyticsData {
   paceForecast: AnalyticsPaceForecast;
 }
 
+export type AiApiKeySource = 'ui' | 'env' | 'none';
+
+export interface AiCustomHeader {
+  key: string;
+  value: string;
+}
+
 export interface AiStatus {
   enabled: boolean;
   model: string;
   baseUrl: string;
+}
+
+export interface AiSettings {
+  enabled: boolean;
+  hasCustomConfig: boolean;
+  apiKeySource: AiApiKeySource;
+  hasApiKey: boolean;
+  maskedApiKey: string | null;
+  baseUrl: string;
+  model: string;
+  reasoningEffort: string;
+  customHeaders: AiCustomHeader[];
+  timeoutMs: number;
+  envDefaults: {
+    hasApiKey: boolean;
+    baseUrl: string;
+    model: string;
+    reasoningEffort: string;
+    customHeaders: AiCustomHeader[];
+    timeoutMs: number;
+  };
+  updatedAt: string | null;
+}
+
+export interface AiSettingsUpdateRequest {
+  apiKey?: string | null;
+  baseUrl?: string;
+  model?: string;
+  reasoningEffort?: string;
+  customHeaders?: AiCustomHeader[];
+  timeoutMs?: number;
+}
+
+export interface AiTestRequest {
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+  reasoningEffort?: string;
+  customHeaders?: AiCustomHeader[];
+  timeoutMs?: number;
+}
+
+export interface AiTestResponse {
+  ok: boolean;
+  latencyMs: number;
+  model: string;
+  baseUrl: string;
+  reply?: string;
 }
 
 export interface AiInterviewReviewRequest {

@@ -1185,6 +1185,15 @@ onBeforeUnmount(() => {
           <div class="alert-body">
             <strong>{{ $t('ai.notConfiguredTitle') }}</strong>
             {{ $t('ai.notConfiguredHint') }}
+            <div class="mt-8">
+              <RouterLink
+                to="/settings#ai-settings"
+                class="link-btn"
+                @click="showAiPlanModal = false"
+              >
+                {{ $t('ai.openSettingsCta') }} →
+              </RouterLink>
+            </div>
           </div>
         </div>
 
