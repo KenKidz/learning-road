@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import Icon from './Icon.vue';
 import LocaleSwitcher from './LocaleSwitcher.vue';
 import FocusTimerWidget from './FocusTimerWidget.vue';
@@ -11,14 +12,15 @@ const props = defineProps<{ authRequired: boolean }>();
 const emit = defineEmits<{ logout: [] }>();
 
 const route = useRoute();
+const { t } = useI18n();
 const { theme, toggle } = useTheme();
 const mobileOpen = ref(false);
 
 const studyNav = [
-  { to: '/', labelKey: 'nav.dashboard', icon: 'dashboard' },
-  { to: '/roadmap', labelKey: 'nav.roadmap', icon: 'roadmap' },
-  { to: '/planner', labelKey: 'nav.planner', icon: 'planner' },
-  { to: '/notes', labelKey: 'nav.notes', icon: 'notes' },
+  { to: '/', labelKey: 'nav.dashboard', shortLabelKey: 'nav.shortDashboard', icon: 'dashboard' },
+  { to: '/roadmap', labelKey: 'nav.roadmap', shortLabelKey: 'nav.shortRoadmap', icon: 'roadmap' },
+  { to: '/planner', labelKey: 'nav.planner', shortLabelKey: 'nav.shortPlanner', icon: 'planner' },
+  { to: '/notes', labelKey: 'nav.notes', shortLabelKey: 'nav.shortNotes', icon: 'notes' },
 ];
 
 const careerNav = [
@@ -27,14 +29,40 @@ const careerNav = [
   { to: '/jobs', labelKey: 'nav.jobs', icon: 'jobs' },
 ];
 
+const isMoreActive = computed(
+  () =>
+    mobileOpen.value ||
+    careerNav.some((item) => isActive(item.to)) ||
+    isActive('/settings'),
+);
+
+const mobileHeaderTitle = computed(() => {
+  if (route.path === '/') return 'Learning Road';
+  const titleKey = typeof route.meta.titleKey === 'string' ? route.meta.titleKey : '';
+  return titleKey ? t(titleKey) : 'Learning Road';
+});
+
 function isActive(to: string): boolean {
   if (to === '/') return route.path === '/';
   return route.path === to || route.path.startsWith(`${to}/`);
 }
 
 function openSearchPalette() {
+  mobileOpen.value = false;
   window.dispatchEvent(new CustomEvent('lr:open-command-palette'));
 }
+
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && mobileOpen.value) {
+    mobileOpen.value = false;
+  }
+}
+
+watch(mobileOpen, (open) => {
+  if (typeof document !== 'undefined') {
+    document.body.classList.toggle('drawer-open', open);
+  }
+});
 
 watch(
   () => route.fullPath,
@@ -42,6 +70,17 @@ watch(
     mobileOpen.value = false;
   },
 );
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown);
+  if (typeof document !== 'undefined') {
+    document.body.classList.remove('drawer-open');
+  }
+});
 </script>
 
 <template>
@@ -65,7 +104,7 @@ watch(
           :aria-label="$t('app.closeMenu')"
           @click="mobileOpen = false"
         >
-          <Icon name="close" :size="16" />
+          <Icon name="close" :size="18" />
         </button>
       </div>
 
@@ -73,7 +112,7 @@ watch(
         <button type="button" class="sidebar-search-btn" @click="openSearchPalette">
           <Icon name="search" :size="14" />
           <span class="sidebar-search-label">{{ $t('palette.trigger') }}</span>
-          <span class="kbd">Ctrl+K</span>
+          <span class="kbd kbd-desktop-only">Ctrl+K</span>
         </button>
       </div>
 
@@ -140,50 +179,75 @@ watch(
     <div class="scrim" :class="{ show: mobileOpen }" @click="mobileOpen = false" />
 
     <div class="main">
-      <div class="mobile-topbar">
-        <div class="row">
+      <header class="mobile-topbar">
+        <div class="mobile-topbar-left">
           <button
             type="button"
-            class="btn btn-ghost btn-icon"
+            class="btn btn-ghost btn-icon mobile-topbar-menu"
             :aria-label="$t('app.openMenu')"
+            :aria-expanded="mobileOpen"
             @click="mobileOpen = true"
           >
-            <Icon name="menu" />
+            <Icon name="menu" :size="19" />
           </button>
-          <RouterLink to="/" class="row" style="gap: 8px">
+          <RouterLink to="/" class="mobile-topbar-brand">
             <div class="brand-mark" aria-hidden="true">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M4 19L10 5M14 5l6 14M12 17v2M12 11v2M12 5v2" />
               </svg>
             </div>
-            <span class="mobile-topbar-title">Learning Road</span>
+            <span class="mobile-topbar-title">{{ mobileHeaderTitle }}</span>
           </RouterLink>
         </div>
-        <div class="row" style="gap: 6px">
+        <div class="mobile-topbar-right">
           <button
             type="button"
             class="btn btn-ghost btn-icon"
             :aria-label="$t('palette.trigger')"
             @click="openSearchPalette"
           >
-            <Icon name="search" :size="16" />
+            <Icon name="search" :size="17" />
           </button>
           <FocusTimerWidget compact />
-          <LocaleSwitcher compact />
+          <LocaleSwitcher compact class="mobile-topbar-locale" />
           <button
             type="button"
             class="btn btn-ghost btn-icon"
             :aria-label="theme === 'dark' ? $t('app.switchToLight') : $t('app.switchToDark')"
             @click="toggle"
           >
-            <Icon :name="theme === 'dark' ? 'sun' : 'moon'" />
+            <Icon :name="theme === 'dark' ? 'sun' : 'moon'" :size="17" />
           </button>
         </div>
-      </div>
+      </header>
 
       <main class="content">
         <slot />
       </main>
+
+      <nav class="mobile-bottom-nav" :aria-label="$t('nav.mobileBottomAria')">
+        <RouterLink
+          v-for="item in studyNav"
+          :key="item.to"
+          :to="item.to"
+          class="mobile-bottom-item"
+          :class="{ active: !mobileOpen && isActive(item.to) }"
+        >
+          <Icon :name="item.icon" :size="19" />
+          <span class="mobile-bottom-label">{{ $t(item.shortLabelKey) }}</span>
+        </RouterLink>
+        <button
+          type="button"
+          class="mobile-bottom-item"
+          :class="{ active: isMoreActive }"
+          :aria-label="$t('app.openMenu')"
+          :aria-expanded="mobileOpen"
+          @click="mobileOpen = !mobileOpen"
+        >
+          <Icon name="menu" :size="19" />
+          <span class="mobile-bottom-label">{{ $t('nav.more') }}</span>
+        </button>
+      </nav>
     </div>
   </div>
   <CommandPalette />

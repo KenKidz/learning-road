@@ -406,7 +406,7 @@ onMounted(() => {
         </div>
       </div>
 
-      <form class="row wrap" style="gap: 8px" @submit.prevent="runAiCoaching">
+      <form class="row wrap ai-coach-form" style="gap: 8px" @submit.prevent="runAiCoaching">
         <input
           v-model="coachFocus"
           class="input grow"
@@ -610,7 +610,7 @@ onMounted(() => {
             </div>
             <RouterLink to="/interview" class="link-btn">{{ $t('common.details') }}</RouterLink>
           </div>
-          <div class="grid cols-3">
+          <div class="kpi-trio">
             <div>
               <div class="stat-value tabular">{{ data.interview.mastered }}</div>
               <div class="stat-note">{{ $t('dashboard.mastered') }}</div>
@@ -660,7 +660,7 @@ onMounted(() => {
             </EmptyState>
           </div>
           <div v-else>
-            <div class="grid cols-2" style="gap: 8px">
+            <div class="mini-status-grid">
               <div
                 v-for="status in jobOrder"
                 :key="status"

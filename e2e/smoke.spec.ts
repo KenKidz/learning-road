@@ -67,7 +67,7 @@ test.describe('Learning Road E2E smoke flows', () => {
     page,
   }) => {
     await page.goto('/jobs');
-    await page.getByRole('button', { name: /Thêm hồ sơ|Add application/i }).click();
+    await page.locator('.page-header').getByRole('button', { name: /Thêm hồ sơ|Add application/i }).click();
     const modal = page.getByRole('dialog');
     await modal.locator('#job-company').fill('Acme Corp');
     await modal.locator('#job-position').fill('Fullstack Engineer');

@@ -673,7 +673,7 @@ onMounted(async () => {
     </div>
 
     <div class="row-between wrap mt-16" style="gap: 10px">
-      <div class="tabs">
+      <div class="tabs tabs-full">
         <button type="button" class="tab" :class="{ active: tab === 'topics' }" @click="tab = 'topics'">
           {{ $t('interview.topicsTab') }}
         </button>
@@ -696,8 +696,8 @@ onMounted(async () => {
 
     <div v-if="tab === 'topics'" class="stack mt-16">
       <div v-if="topics.length > 0" class="card compact">
-        <div class="row wrap" style="gap: 10px">
-          <div class="input-wrap" style="max-width: 300px">
+        <div class="filter-controls" style="gap: 10px">
+          <div class="input-wrap filter-search">
             <Icon name="search" :size="15" class="input-icon-left" />
             <input
               v-model="topicSearch"
@@ -717,7 +717,7 @@ onMounted(async () => {
               <Icon name="close" :size="13" />
             </button>
           </div>
-          <select v-model="statusFilter" class="select input-sm" style="max-width: 180px">
+          <select v-model="statusFilter" class="select input-sm filter-select">
             <option value="all">{{ $t('interview.allStatuses') }}</option>
             <option v-for="status in INTERVIEW_STATUSES" :key="status" :value="status">
               {{ interviewStatusLabels[status] }}
@@ -1138,17 +1138,16 @@ onMounted(async () => {
           <span class="badge badge-neutral tabular">{{ checklistDone }}/{{ checklist.length }}</span>
         </div>
 
-        <form class="row wrap" style="gap: 8px; margin-bottom: 16px" @submit.prevent="addChecklistItem">
+        <form class="filter-controls" style="gap: 8px; margin-bottom: 16px" @submit.prevent="addChecklistItem">
           <input
             v-model="checklistForm.title"
-            class="input grow"
+            class="input grow filter-search"
             :placeholder="$t('interview.addKnowledgePlaceholder')"
             :aria-label="$t('interview.knowledgeAria')"
           />
           <input
             v-model="checklistForm.category"
-            class="input"
-            style="max-width: 170px"
+            class="input filter-select"
             :placeholder="$t('interview.categoryAria')"
             :aria-label="$t('interview.categoryAria')"
           />

@@ -476,9 +476,9 @@ onMounted(() => void load(true));
       <div class="divider" />
 
       <div class="row-between wrap" style="margin-bottom: 12px; gap: 10px">
-        <div class="row wrap" style="gap: 10px">
+        <div class="row wrap" style="gap: 10px; min-width: 0; max-width: 100%">
           <h3>{{ $t('projects.features') }}</h3>
-          <div v-if="project.features.length > 0" class="tabs">
+          <div v-if="project.features.length > 0" class="tabs tabs-scroll">
             <button
               type="button"
               class="tab"
@@ -615,7 +615,7 @@ onMounted(() => void load(true));
               </div>
               <p v-if="feature.description" class="card-hint">{{ feature.description }}</p>
             </div>
-            <div class="row" style="gap: 4px">
+            <div class="row feature-card-head-actions" style="gap: 4px">
               <select
                 class="select input-sm"
                 style="max-width: 150px"

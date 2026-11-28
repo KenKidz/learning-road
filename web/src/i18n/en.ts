@@ -27,6 +27,7 @@ const en: Messages = {
   },
   nav: {
     mainAria: 'Main navigation',
+    mobileBottomAria: 'Quick navigation',
     study: 'Study',
     career: 'Career',
     system: 'System',
@@ -38,6 +39,11 @@ const en: Messages = {
     interview: 'Interview prep',
     jobs: 'Applications',
     settings: 'Settings & data',
+    more: 'More',
+    shortDashboard: 'Home',
+    shortRoadmap: 'Roadmap',
+    shortPlanner: 'Planner',
+    shortNotes: 'Notes',
   },
   common: {
     save: 'Save',
@@ -750,6 +756,7 @@ const en: Messages = {
     restoreDraft: 'Restore draft',
     dismissDraft: 'Dismiss draft',
     draftRestored: 'Draft restored.',
+    backToList: 'All notes',
   },
   settings: {
     subtitle: 'Start date, timezone, study goals, career profile, AI configuration and JSON export/import.',

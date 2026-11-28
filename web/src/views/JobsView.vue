@@ -300,7 +300,7 @@ onMounted(load);
       <ul class="list">
         <li v-for="application in followUps" :key="application.id" class="list-item">
           <div class="grow">
-            <div class="row-between">
+            <div class="row-between wrap">
               <strong>{{ application.company }} — {{ application.position }}</strong>
               <button type="button" class="btn btn-sm" @click="completeFollowUp(application)">
                 <Icon name="check" :size="14" /> {{ $t('jobs.followUpDone') }}
@@ -324,8 +324,8 @@ onMounted(load);
             {{ $t('jobs.applicationsHint') }}
           </p>
         </div>
-        <div class="row wrap" style="gap: 10px">
-          <div class="input-wrap" style="max-width: 240px">
+        <div class="filter-controls" style="gap: 10px">
+          <div class="input-wrap filter-search">
             <Icon name="search" :size="15" class="input-icon-left" />
             <input
               v-model="search"
@@ -450,79 +450,159 @@ onMounted(load);
         </KanbanBoard>
       </div>
 
-      <div v-else class="table-wrap">
-        <table class="table">
-          <thead>
-            <tr>
-              <th>{{ $t('jobs.companyPosition') }}</th>
-              <th>{{ $t('jobs.status') }}</th>
-              <th>{{ $t('jobs.applied') }}</th>
-              <th>{{ $t('jobs.followUp') }}</th>
-              <th>{{ $t('jobs.contactCv') }}</th>
-              <th :aria-label="$t('jobs.actions')">{{ $t('jobs.actions') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="application in filtered" :key="application.id">
-              <td>
+      <template v-else>
+        <div class="table-wrap jobs-table-desktop">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>{{ $t('jobs.companyPosition') }}</th>
+                <th>{{ $t('jobs.status') }}</th>
+                <th>{{ $t('jobs.applied') }}</th>
+                <th>{{ $t('jobs.followUp') }}</th>
+                <th>{{ $t('jobs.contactCv') }}</th>
+                <th :aria-label="$t('jobs.actions')">{{ $t('jobs.actions') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="application in filtered" :key="application.id">
+                <td>
+                  <div class="cell-main">{{ application.company }}</div>
+                  <div class="cell-sub">{{ application.position }}</div>
+                  <a
+                    v-if="application.jobUrl"
+                    :href="application.jobUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="cell-link"
+                  >
+                    <Icon name="external" :size="12" /> {{ $t('jobs.jobUrl') }}
+                  </a>
+                  <div v-if="application.notes" class="cell-sub" style="max-width: 320px">
+                    {{ application.notes }}
+                  </div>
+                </td>
+                <td>
+                  <div class="stack-sm" style="gap: 6px; align-items: flex-start">
+                    <span class="badge" :class="`badge-${badgeToneForJobStatus(application.status)}`">
+                      {{ jobStatusLabels[application.status] }}
+                    </span>
+                    <select
+                      class="select input-sm"
+                      style="max-width: 145px"
+                      :value="application.status"
+                      :aria-label="$t('jobs.statusAria', { company: application.company })"
+                      @change="changeStatus(application, $event)"
+                    >
+                      <option v-for="status in JOB_STATUSES" :key="status" :value="status">
+                        {{ jobStatusLabels[status] }}
+                      </option>
+                    </select>
+                  </div>
+                </td>
+                <td class="nowrap tabular">{{ formatDate(application.appliedAt) }}</td>
+                <td class="nowrap tabular">
+                  <span v-if="application.followUpAt" :class="{ 'text-danger': application.followUpAt <= today }">
+                    {{ formatDate(application.followUpAt) }}
+                  </span>
+                  <span v-else class="muted">{{ $t('jobs.noContact') }}</span>
+                </td>
+                <td>
+                  <div>{{ application.contactPerson ?? '—' }}</div>
+                  <div class="cell-sub">{{ application.cvVersion ? $t('jobs.cv', { version: application.cvVersion }) : $t('jobs.noCv') }}</div>
+                </td>
+                <td>
+                  <div class="row" style="gap: 2px">
+                    <button type="button" class="btn btn-ghost btn-icon btn-sm" :title="$t('jobs.edit')" @click="openEdit(application)">
+                      <Icon name="edit" :size="14" />
+                    </button>
+                    <button type="button" class="btn btn-ghost btn-icon btn-sm btn-danger-hover" :title="$t('jobs.delete')" @click="remove(application)">
+                      <Icon name="trash" :size="14" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="jobs-cards-mobile">
+          <article v-for="application in filtered" :key="`card-${application.id}`" class="job-mobile-card">
+            <div class="row-between wrap" style="gap: 8px; align-items: flex-start">
+              <div class="grow">
                 <div class="cell-main">{{ application.company }}</div>
                 <div class="cell-sub">{{ application.position }}</div>
-                <a
-                  v-if="application.jobUrl"
-                  :href="application.jobUrl"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="cell-link"
-                >
-                  <Icon name="external" :size="12" /> {{ $t('jobs.jobUrl') }}
-                </a>
-                <div v-if="application.notes" class="cell-sub" style="max-width: 320px">
-                  {{ application.notes }}
-                </div>
-              </td>
-              <td>
-                <div class="stack-sm" style="gap: 6px; align-items: flex-start">
-                  <span class="badge" :class="`badge-${badgeToneForJobStatus(application.status)}`">
-                    {{ jobStatusLabels[application.status] }}
-                  </span>
-                  <select
-                    class="select input-sm"
-                    style="max-width: 145px"
-                    :value="application.status"
-                    :aria-label="$t('jobs.statusAria', { company: application.company })"
-                    @change="changeStatus(application, $event)"
-                  >
-                    <option v-for="status in JOB_STATUSES" :key="status" :value="status">
-                      {{ jobStatusLabels[status] }}
-                    </option>
-                  </select>
-                </div>
-              </td>
-              <td class="nowrap tabular">{{ formatDate(application.appliedAt) }}</td>
-              <td class="nowrap tabular">
-                <span v-if="application.followUpAt" :class="{ 'text-danger': application.followUpAt <= today }">
-                  {{ formatDate(application.followUpAt) }}
+              </div>
+              <span class="badge" :class="`badge-${badgeToneForJobStatus(application.status)}`">
+                {{ jobStatusLabels[application.status] }}
+              </span>
+            </div>
+
+            <div class="list-meta" style="margin-top: 0">
+              <span v-if="application.appliedAt" class="tabular">
+                {{ $t('jobs.applied') }}: {{ formatDate(application.appliedAt) }}
+              </span>
+              <template v-if="application.followUpAt">
+                <span v-if="application.appliedAt" class="sep">·</span>
+                <span class="tabular" :class="{ 'text-danger': application.followUpAt <= today }">
+                  {{ $t('jobs.followUpDate', { date: formatDate(application.followUpAt) }) }}
                 </span>
-                <span v-else class="muted">{{ $t('jobs.noContact') }}</span>
-              </td>
-              <td>
-                <div>{{ application.contactPerson ?? '—' }}</div>
-                <div class="cell-sub">{{ application.cvVersion ? $t('jobs.cv', { version: application.cvVersion }) : $t('jobs.noCv') }}</div>
-              </td>
-              <td>
-                <div class="row" style="gap: 2px">
-                  <button type="button" class="btn btn-ghost btn-icon btn-sm" :title="$t('jobs.edit')" @click="openEdit(application)">
-                    <Icon name="edit" :size="14" />
-                  </button>
-                  <button type="button" class="btn btn-ghost btn-icon btn-sm btn-danger-hover" :title="$t('jobs.delete')" @click="remove(application)">
-                    <Icon name="trash" :size="14" />
-                  </button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+              </template>
+              <template v-if="application.contactPerson">
+                <span class="sep">·</span>
+                <span>{{ application.contactPerson }}</span>
+              </template>
+              <template v-if="application.cvVersion">
+                <span class="sep">·</span>
+                <span>{{ $t('jobs.cv', { version: application.cvVersion }) }}</span>
+              </template>
+            </div>
+
+            <a
+              v-if="application.jobUrl"
+              :href="application.jobUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="cell-link"
+              style="margin-top: 0"
+            >
+              <Icon name="external" :size="13" /> {{ $t('jobs.jobUrl') }}
+            </a>
+
+            <p v-if="application.notes" class="muted">{{ application.notes }}</p>
+
+            <div class="job-mobile-card-foot">
+              <select
+                class="select input-sm"
+                :value="application.status"
+                :aria-label="$t('jobs.statusAria', { company: application.company })"
+                @change="changeStatus(application, $event)"
+              >
+                <option v-for="status in JOB_STATUSES" :key="status" :value="status">
+                  {{ jobStatusLabels[status] }}
+                </option>
+              </select>
+              <button
+                type="button"
+                class="btn btn-ghost btn-icon btn-sm"
+                :title="$t('jobs.edit')"
+                :aria-label="$t('jobs.edit')"
+                @click="openEdit(application)"
+              >
+                <Icon name="edit" :size="15" />
+              </button>
+              <button
+                type="button"
+                class="btn btn-ghost btn-icon btn-sm btn-danger-hover"
+                :title="$t('jobs.delete')"
+                :aria-label="$t('jobs.delete')"
+                @click="remove(application)"
+              >
+                <Icon name="trash" :size="15" />
+              </button>
+            </div>
+          </article>
+        </div>
+      </template>
     </section>
   </template>
 

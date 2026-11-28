@@ -15,6 +15,10 @@ watch(
   (value) => {
     document.documentElement.dataset.theme = value;
     window.localStorage.setItem('lr-theme', value);
+    const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+    if (meta) {
+      meta.content = value === 'dark' ? '#121722' : '#ffffff';
+    }
   },
   { immediate: true },
 );

@@ -46,6 +46,7 @@ const filterType = ref('all');
 const search = ref('');
 const editorMode = ref<'write' | 'split' | 'preview'>('write');
 const creating = ref(false);
+const mobileEditorOpen = ref(false);
 const editorTextarea = ref<HTMLTextAreaElement | null>(null);
 
 interface NoteDraft {
@@ -269,14 +270,18 @@ async function load() {
       const note = notes.value.find((item) => item.id === queryNoteId);
       if (note) {
         await selectNote(note, true);
+        mobileEditorOpen.value = true;
         return;
       }
     }
     if (queryType) {
       await startNew(queryType, queryRelatedId, true);
+      mobileEditorOpen.value = true;
       return;
     }
-    if (notes.value[0]) await selectNote(notes.value[0], true);
+    if (notes.value[0]) {
+      await selectNote(notes.value[0], true, false);
+    }
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : t('errors.notesLoad');
   } finally {
@@ -294,7 +299,7 @@ async function confirmSwitchIfDirty(): Promise<boolean> {
   });
 }
 
-async function selectNote(note: LearningNote, force = false) {
+async function selectNote(note: LearningNote, force = false, openOnMobile = true) {
   if (!force && selectedId.value !== note.id && !(await confirmSwitchIfDirty())) return;
   selectedId.value = note.id;
   creating.value = false;
@@ -305,6 +310,9 @@ async function selectNote(note: LearningNote, force = false) {
   syncSnapshot();
   formError.value = '';
   checkDraftForCurrent();
+  if (openOnMobile) {
+    mobileEditorOpen.value = true;
+  }
 }
 
 async function startNew(
@@ -327,6 +335,7 @@ async function startNew(
   }
   syncSnapshot();
   checkDraftForCurrent();
+  mobileEditorOpen.value = true;
 }
 
 async function save() {
@@ -387,8 +396,9 @@ async function removeNote() {
     toast.success(t('notes.deleted'));
     selectedId.value = null;
     creating.value = false;
+    mobileEditorOpen.value = false;
     await loadNotes();
-    if (notes.value[0]) await selectNote(notes.value[0], true);
+    if (notes.value[0]) await selectNote(notes.value[0], true, false);
   } catch (err) {
     toast.error(err instanceof ApiError ? err.message : t('errors.unexpected'));
   }
@@ -437,7 +447,7 @@ onMounted(load);
     </EmptyState>
   </div>
 
-  <div v-else class="notes-layout">
+  <div v-else class="notes-layout" :class="{ 'mobile-editor-open': mobileEditorOpen }">
     <aside class="card notes-sidebar">
       <div class="stack-sm">
         <div class="input-wrap">
@@ -499,10 +509,18 @@ onMounted(load);
       </ul>
     </aside>
 
-    <section class="card" @keydown="handleEditorKeydown">
+    <section class="card notes-editor-card" @keydown="handleEditorKeydown">
       <template v-if="showEditor">
         <div class="card-head wrap">
           <div>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm notes-back-btn"
+              style="margin-bottom: 8px; margin-left: -8px"
+              @click="mobileEditorOpen = false"
+            >
+              <Icon name="chevron-left" :size="15" /> {{ $t('notes.backToList') }}
+            </button>
             <div class="row" style="gap: 8px">
               <h2 class="card-title">{{ selectedId !== null ? $t('notes.editTitle') : $t('notes.newNote') }}</h2>
               <span v-if="isDirty" class="badge badge-warning">{{ $t('common.unsaved') }}</span>
@@ -513,7 +531,7 @@ onMounted(load);
             <button type="button" class="tab" :class="{ active: editorMode === 'write' }" @click="editorMode = 'write'">
               {{ $t('notes.writeTab') }}
             </button>
-            <button type="button" class="tab" :class="{ active: editorMode === 'split' }" @click="editorMode = 'split'">
+            <button type="button" class="tab notes-split-tab" :class="{ active: editorMode === 'split' }" @click="editorMode = 'split'">
               <Icon name="columns" :size="13" /> {{ $t('notes.splitTab') }}
             </button>
             <button type="button" class="tab" :class="{ active: editorMode === 'preview' }" @click="editorMode = 'preview'">
@@ -583,7 +601,7 @@ onMounted(load);
                     {{ $t('notes.toolbarList') }}
                   </button>
                 </div>
-                <span class="kbd">{{ $t('notes.saveShortcut') }}</span>
+                <span class="kbd kbd-desktop-only">{{ $t('notes.saveShortcut') }}</span>
               </div>
               <textarea
                 id="note-content"
@@ -607,7 +625,7 @@ onMounted(load);
                     <button type="button" class="md-tool-btn" @click="insertSnippet('`', '`', 'code')">Code</button>
                     <button type="button" class="md-tool-btn" @click="insertSnippet('\n- ', '', 'item')">List</button>
                   </div>
-                  <span class="kbd">Ctrl+S</span>
+                  <span class="kbd kbd-desktop-only">Ctrl+S</span>
                 </div>
                 <textarea
                   id="note-content-split"

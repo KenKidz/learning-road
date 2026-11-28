@@ -654,7 +654,7 @@ onBeforeUnmount(() => {
   <template v-else-if="settings">
     <div class="card compact">
       <div class="row-between wrap" style="gap: 12px">
-        <div class="tabs">
+        <div class="tabs tabs-full">
           <button type="button" class="tab" :class="{ active: tab === 'today' }" @click="switchTab('today')">
             {{ $t('common.today') }}
           </button>
@@ -666,11 +666,11 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div v-if="tab !== 'history'" class="row wrap" style="gap: 6px">
+        <div v-if="tab !== 'history'" class="date-nav">
           <button type="button" class="btn btn-ghost btn-icon btn-sm" :aria-label="$t('planner.prev')" @click="shiftDate(-1)">
             <Icon name="chevron-left" :size="16" />
           </button>
-          <input v-model="selectedDate" class="input input-sm" type="date" style="width: 150px" @change="loadCurrent" />
+          <input v-model="selectedDate" class="input input-sm date-nav-input" type="date" @change="loadCurrent" />
           <button type="button" class="btn btn-ghost btn-icon btn-sm" :aria-label="$t('planner.next')" @click="shiftDate(1)">
             <Icon name="chevron-right" :size="16" />
           </button>
@@ -759,11 +759,10 @@ onBeforeUnmount(() => {
               <span v-if="quickAdding" class="spinner" /> {{ $t('common.add') }}
             </button>
           </div>
-          <div class="row wrap" style="gap: 8px">
+          <div class="filter-controls" style="gap: 8px">
             <select
               v-model="quickCourseId"
-              class="select input-sm"
-              style="max-width: 240px"
+              class="select input-sm filter-search"
               :aria-label="$t('planner.quickCourseLabel')"
             >
               <option value="">{{ $t('planner.quickCourseLabel') }}</option>

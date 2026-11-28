@@ -214,8 +214,8 @@ onMounted(load);
 
   <div class="card compact">
     <div class="row-between wrap" style="gap: 12px">
-      <div class="row wrap" style="gap: 10px">
-        <div class="tabs">
+      <div class="filter-controls">
+        <div class="tabs tabs-scroll">
           <button
             type="button"
             class="tab"
@@ -236,7 +236,7 @@ onMounted(load);
           </button>
         </div>
 
-        <div class="input-wrap" style="max-width: 240px">
+        <div class="input-wrap filter-search">
           <Icon name="search" :size="15" class="input-icon-left" />
           <input
             v-model="search"
@@ -257,14 +257,14 @@ onMounted(load);
           </button>
         </div>
 
-        <select v-model="statusFilter" class="select input-sm" style="max-width: 175px" :aria-label="$t('roadmap.filterStatusAria')">
+        <select v-model="statusFilter" class="select input-sm filter-select" :aria-label="$t('roadmap.filterStatusAria')">
           <option value="all">{{ $t('roadmap.filterStatus') }}</option>
           <option v-for="status in COURSE_STATUSES" :key="status" :value="status">
             {{ courseStatusLabels[status] }}
           </option>
         </select>
 
-        <select v-model="sortBy" class="select input-sm" style="max-width: 175px" :aria-label="$t('roadmap.sortAria')">
+        <select v-model="sortBy" class="select input-sm filter-select" :aria-label="$t('roadmap.sortAria')">
           <option value="default">{{ $t('roadmap.sortDefault') }}</option>
           <option value="progress">{{ $t('roadmap.sortProgress') }}</option>
           <option value="duration">{{ $t('roadmap.sortDuration') }}</option>
@@ -325,7 +325,7 @@ onMounted(load);
             </p>
           </div>
         </div>
-        <div class="row" style="gap: 10px; min-width: 170px">
+        <div class="row roadmap-group-progress" style="gap: 10px; min-width: 170px">
           <div class="grow">
             <ProgressBar
               :value="group.avgProgress"
@@ -402,8 +402,7 @@ onMounted(load);
 
           <div class="course-footer">
             <select
-              class="select input-sm"
-              style="max-width: 165px"
+              class="select input-sm course-status-select"
               :value="course.status"
               :disabled="statusUpdating === course.id"
               :aria-label="$t('roadmap.statusAria', { title: course.title })"

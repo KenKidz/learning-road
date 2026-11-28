@@ -25,6 +25,7 @@ const vi = {
   },
   nav: {
     mainAria: 'Điều hướng chính',
+    mobileBottomAria: 'Điều hướng nhanh',
     study: 'Học tập',
     career: 'Sự nghiệp',
     system: 'Hệ thống',
@@ -36,6 +37,11 @@ const vi = {
     interview: 'Luyện phỏng vấn',
     jobs: 'Ứng tuyển',
     settings: 'Cài đặt & dữ liệu',
+    more: 'Thêm',
+    shortDashboard: 'Tổng quan',
+    shortRoadmap: 'Roadmap',
+    shortPlanner: 'Kế hoạch',
+    shortNotes: 'Ghi chú',
   },
   common: {
     save: 'Lưu',
@@ -754,6 +760,7 @@ const vi = {
     restoreDraft: 'Khôi phục nháp',
     dismissDraft: 'Bỏ nháp',
     draftRestored: 'Đã khôi phục bản nháp.',
+    backToList: 'Danh sách ghi chú',
   },
   settings: {
     subtitle:

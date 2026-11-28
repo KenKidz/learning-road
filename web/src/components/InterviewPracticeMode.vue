@@ -216,7 +216,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown));
   <div class="stack">
     <div class="card compact">
       <div class="row-between wrap" style="gap: 10px">
-        <div class="tabs">
+        <div class="tabs tabs-full">
           <button
             type="button"
             class="tab"
@@ -244,11 +244,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown));
           </button>
         </div>
 
-        <div class="row wrap" style="gap: 8px">
+        <div class="filter-controls" style="gap: 8px">
           <select
             v-model="selectedTopicId"
-            class="select input-sm"
-            style="max-width: 220px"
+            class="select input-sm filter-select"
             :aria-label="$t('practice.filterTopic')"
           >
             <option value="all">{{ $t('practice.allTopics') }}</option>
@@ -352,7 +351,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown));
           <Icon v-else name="sparkles" :size="15" />
           {{ aiReviewing ? $t('ai.interviewReviewing') : $t('ai.interviewReviewBtn') }}
         </button>
-        <span class="kbd" style="margin-left: auto">{{ $t('practice.shortcutHint') }}</span>
+        <span class="kbd kbd-desktop-only" style="margin-left: auto">{{ $t('practice.shortcutHint') }}</span>
       </div>
 
       <div v-if="flipped" class="feature-card mt-16">
@@ -399,7 +398,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown));
 
       <div v-if="flipped" class="stack-sm">
         <div class="field-label">{{ $t('practice.ratePrompt') }}</div>
-        <div class="row wrap" style="gap: 8px">
+        <div class="practice-rating-grid">
           <button
             v-for="level in [1, 2, 3, 4, 5]"
             :key="level"

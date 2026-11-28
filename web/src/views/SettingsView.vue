@@ -1140,13 +1140,13 @@ onMounted(load);
           </div>
         </div>
         <ul class="stack-sm">
-          <li class="row-between">
+          <li class="kv-row">
             <span class="muted">{{ $t('settings.passwordProtection') }}</span>
             <span class="badge" :class="authStatus?.required ? 'badge-success' : 'badge-warning'">
               {{ authStatus?.required ? $t('settings.authOn') : $t('settings.authOff') }}
             </span>
           </li>
-          <li class="row-between">
+          <li class="kv-row">
             <span class="muted">{{ $t('ai.statusTitle') }}</span>
             <span class="badge" :class="aiStatus?.enabled ? 'badge-success' : 'badge-neutral'">
               {{
@@ -1156,21 +1156,21 @@ onMounted(load);
               }}
             </span>
           </li>
-          <li v-if="aiStatus" class="row-between">
+          <li v-if="aiStatus" class="kv-row">
             <span class="muted">{{ $t('ai.baseUrlLabel') }}</span>
-            <span class="mono">{{ aiStatus.baseUrl }}</span>
+            <span class="mono kv-value">{{ aiStatus.baseUrl }}</span>
           </li>
-          <li class="row-between">
+          <li class="kv-row">
             <span class="muted">{{ $t('settings.seedData') }}</span>
-            <span>{{ $t('settings.seedValue') }}</span>
+            <span class="kv-value">{{ $t('settings.seedValue') }}</span>
           </li>
-          <li class="row-between">
+          <li class="kv-row">
             <span class="muted">{{ $t('settings.progressData') }}</span>
-            <span>{{ $t('settings.progressValue') }}</span>
+            <span class="kv-value">{{ $t('settings.progressValue') }}</span>
           </li>
-          <li class="row-between">
+          <li class="kv-row">
             <span class="muted">{{ $t('settings.todaySetting') }}</span>
-            <span class="tabular">{{ todayLabel }}</span>
+            <span class="tabular kv-value">{{ todayLabel }}</span>
           </li>
         </ul>
         <p class="field-hint mt-12">

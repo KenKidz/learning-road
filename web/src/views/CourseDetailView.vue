@@ -535,7 +535,7 @@ watch(
             <div
               v-for="topic in contentTopics"
               :key="topic.id"
-              class="check-item"
+              class="check-item has-multi-actions"
               :class="{ 'is-done': topic.isCompleted }"
             >
               <input
@@ -607,7 +607,7 @@ watch(
             <div
               v-for="topic in dodTopics"
               :key="topic.id"
-              class="check-item"
+              class="check-item has-multi-actions"
               :class="{ 'is-done': topic.isCompleted }"
             >
               <input

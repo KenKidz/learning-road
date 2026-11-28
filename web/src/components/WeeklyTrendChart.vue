@@ -44,14 +44,14 @@ function tooltip(item: AnalyticsWeeklyPoint): string {
 
 <template>
   <div class="bar-chart-wrap">
+    <div
+      v-if="goalPercent !== null"
+      class="bar-goal-line"
+      :style="{ bottom: `${26 + (goalPercent / 100) * 96}px` }"
+    >
+      <span class="bar-goal-label tabular">{{ formatMinutes(weeklyGoalMinutes) }}</span>
+    </div>
     <div class="bar-chart trend-chart" role="img" :aria-label="$t('analytics.weeklyAria')">
-      <div
-        v-if="goalPercent !== null"
-        class="bar-goal-line"
-        :style="{ bottom: `${22 + (goalPercent / 100) * 96}px` }"
-      >
-        <span class="bar-goal-label tabular">{{ formatMinutes(weeklyGoalMinutes) }}</span>
-      </div>
       <div
         v-for="(item, idx) in items"
         :key="item.weekStart"
