@@ -27,6 +27,14 @@ export function resolveTrustProxy(
   return trimmed;
 }
 
+export function parseAiTemperature(raw: string | undefined): number | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 2) return null;
+  return parsed;
+}
+
 const nodeEnv = process.env.NODE_ENV ?? 'development';
 const appPassword = process.env.APP_PASSWORD?.trim() ?? '';
 const fallbackAiSessionId = `ses_${crypto.randomBytes(12).toString('hex')}`;
@@ -59,6 +67,9 @@ export const env = {
   },
   get aiModel(): string {
     return process.env.AI_MODEL?.trim() || 'gpt-6-luna';
+  },
+  get aiTemperature(): number | null {
+    return parseAiTemperature(process.env.AI_TEMPERATURE);
   },
   get aiReasoningEffort(): string {
     return process.env.AI_REASONING_EFFORT?.trim() ?? '';

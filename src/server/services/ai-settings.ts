@@ -34,6 +34,7 @@ const storedAiSettingsSchema = z.object({
   apiKey: z.string().optional(),
   baseUrl: z.string().optional(),
   model: z.string().optional(),
+  temperature: z.number().min(0).max(2).nullable().optional(),
   reasoningEffort: z.string().optional(),
   customHeaders: z.array(storedCustomHeaderSchema).optional(),
   /** Legacy field migrated seamlessly to x-opencode-session when customHeaders is absent */
@@ -50,6 +51,7 @@ export interface ResolvedAiConfig {
   apiKeySource: AiApiKeySource;
   baseUrl: string;
   model: string;
+  temperature: number | null;
   reasoningEffort: string;
   customHeaders: AiCustomHeader[];
   timeoutMs: number;
@@ -118,6 +120,7 @@ export function resolveEnvAiConfig(): ResolvedAiConfig {
     apiKeySource: apiKey.length > 0 ? 'env' : 'none',
     baseUrl: env.aiBaseUrl,
     model: env.aiModel,
+    temperature: env.aiTemperature,
     reasoningEffort: env.aiReasoningEffort,
     customHeaders: envCustomHeaders(),
     timeoutMs: env.aiTimeoutMs,
@@ -172,6 +175,7 @@ export async function resolveAiConfig(db: AppDb): Promise<ResolvedAiConfig> {
 
   const baseUrl = stored.baseUrl?.trim() ? normalizeBaseUrl(stored.baseUrl) : env.aiBaseUrl;
   const model = stored.model?.trim() || env.aiModel;
+  const temperature = stored.temperature !== undefined ? stored.temperature : env.aiTemperature;
   const reasoningEffort =
     stored.reasoningEffort !== undefined ? stored.reasoningEffort : env.aiReasoningEffort;
   const customHeaders = resolveStoredHeaders(stored);
@@ -184,6 +188,7 @@ export async function resolveAiConfig(db: AppDb): Promise<ResolvedAiConfig> {
     apiKeySource,
     baseUrl,
     model,
+    temperature,
     reasoningEffort,
     customHeaders,
     timeoutMs,
@@ -202,6 +207,7 @@ export function mergeDraftAiConfig(
   const apiKeySource: AiApiKeySource = draftApiKey ? 'ui' : base.apiKeySource;
   const baseUrl = draft.baseUrl?.trim() ? normalizeBaseUrl(draft.baseUrl) : base.baseUrl;
   const model = draft.model?.trim() || base.model;
+  const temperature = draft.temperature !== undefined ? draft.temperature : base.temperature;
   const reasoningEffort =
     draft.reasoningEffort !== undefined ? draft.reasoningEffort.trim() : base.reasoningEffort;
   const customHeaders =
@@ -217,6 +223,7 @@ export function mergeDraftAiConfig(
     apiKeySource,
     baseUrl,
     model,
+    temperature,
     reasoningEffort,
     customHeaders,
     timeoutMs,
@@ -232,6 +239,7 @@ function toAiSettingsDto(config: ResolvedAiConfig): AiSettings {
     maskedApiKey: maskApiKey(config.apiKey),
     baseUrl: config.baseUrl,
     model: config.model,
+    temperature: config.temperature,
     reasoningEffort: config.reasoningEffort,
     customHeaders: config.customHeaders,
     timeoutMs: config.timeoutMs,
@@ -239,6 +247,7 @@ function toAiSettingsDto(config: ResolvedAiConfig): AiSettings {
       hasApiKey: env.aiApiKey.length > 0,
       baseUrl: env.aiBaseUrl,
       model: env.aiModel,
+      temperature: env.aiTemperature,
       reasoningEffort: env.aiReasoningEffort,
       customHeaders: envCustomHeaders(),
       timeoutMs: env.aiTimeoutMs,
@@ -278,6 +287,10 @@ export async function updateAiSettings(
     const trimmed = input.model.trim();
     if (trimmed) next.model = trimmed;
     else delete next.model;
+  }
+
+  if (input.temperature !== undefined) {
+    next.temperature = input.temperature;
   }
 
   if (input.reasoningEffort !== undefined) {

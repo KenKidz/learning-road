@@ -888,6 +888,13 @@ const vi = {
     hideApiKey: 'Ẩn API key',
     clearSavedApiKey: 'Xóa key đã lưu',
     modelPlaceholder: 'gpt-4o-mini, gemini-2.5-flash, gpt-6-luna…',
+    temperatureLabel: 'Temperature',
+    temperaturePlaceholder: 'Để trống để dùng mặc định của model',
+    temperatureHint:
+      'Từ 0 đến 2 (độ sáng tạo). Để trống để không gửi tham số này (khuyên dùng cho các model chỉ hỗ trợ mặc định 1).',
+    temperatureHintWithEnv:
+      'Từ 0 đến 2 (mặc định .env: {value}). Để trống để không gửi tham số này (khuyên dùng cho model chỉ hỗ trợ mặc định).',
+    temperatureUseDefault: 'Dùng mặc định',
     timeoutLabel: 'Timeout (ms)',
     timeoutHint: 'Từ 1.000 đến 300.000 ms (mặc định .env: {ms} ms).',
     reasoningEffortLabel: 'Reasoning Effort',
@@ -916,7 +923,7 @@ const vi = {
     resetToEnv: 'Đặt lại theo .env',
     resetConfirmTitle: 'Đặt lại cấu hình AI theo .env?',
     resetConfirmText:
-      'Toàn bộ cấu hình AI đã lưu trên UI (API key, Base URL, Model, Reasoning Effort và Custom Headers) sẽ bị xóa để quay về giá trị mặc định trong file .env.',
+      'Toàn bộ cấu hình AI đã lưu trên UI (API key, Base URL, Model, Temperature, Reasoning Effort và Custom Headers) sẽ bị xóa để quay về giá trị mặc định trong file .env.',
     settingsSaved: 'Đã lưu cấu hình AI và áp dụng ngay.',
     settingsReset: 'Đã đặt lại cấu hình AI theo .env.',
     apiKeyCleared: 'Đã xóa API key lưu trên UI.',
@@ -925,6 +932,7 @@ const vi = {
     testSuccessToast: 'Kết nối AI thành công ({latency} ms).',
     invalidBaseUrl: 'Base URL phải là đường dẫn http:// hoặc https:// hợp lệ.',
     invalidModel: 'Tên Model không được để trống.',
+    invalidTemperature: 'Temperature phải là số từ 0 đến 2 (hoặc để trống).',
     invalidTimeout: 'Timeout phải từ 1.000 đến 300.000 ms.',
     updatedAtLabel: 'Cập nhật gần nhất: {date}',
     coachTitle: 'AI Study Coach — Phân tích tiến độ thật',

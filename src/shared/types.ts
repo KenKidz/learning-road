@@ -508,6 +508,7 @@ export interface AiSettings {
   maskedApiKey: string | null;
   baseUrl: string;
   model: string;
+  temperature: number | null;
   reasoningEffort: string;
   customHeaders: AiCustomHeader[];
   timeoutMs: number;
@@ -515,6 +516,7 @@ export interface AiSettings {
     hasApiKey: boolean;
     baseUrl: string;
     model: string;
+    temperature: number | null;
     reasoningEffort: string;
     customHeaders: AiCustomHeader[];
     timeoutMs: number;
@@ -526,6 +528,7 @@ export interface AiSettingsUpdateRequest {
   apiKey?: string | null;
   baseUrl?: string;
   model?: string;
+  temperature?: number | null;
   reasoningEffort?: string;
   customHeaders?: AiCustomHeader[];
   timeoutMs?: number;
@@ -535,6 +538,7 @@ export interface AiTestRequest {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+  temperature?: number | null;
   reasoningEffort?: string;
   customHeaders?: AiCustomHeader[];
   timeoutMs?: number;

@@ -38,7 +38,7 @@ export interface AiChatMessage {
 export interface AiCompletionOptions {
   messages: AiChatMessage[];
   jsonMode?: boolean;
-  temperature?: number;
+  temperature?: number | null;
   signal?: AbortSignal;
   config?: ResolvedAiConfig;
 }
@@ -92,27 +92,52 @@ async function readProviderError(response: Response): Promise<string> {
   }
 }
 
-const defaultProvider: AiProvider = {
-  async complete({ messages, jsonMode = false, temperature = 0.3, signal, config: passedConfig }) {
-    const config = passedConfig ?? resolveEnvAiConfig();
-    assertAiConfigured(config);
-    const url = `${config.baseUrl}/chat/completions`;
-    let response: Response;
+export function isUnsupportedTemperatureError(detail: string): boolean {
+  if (!/\btemperature\b/i.test(detail)) return false;
+  return (
+    /unsupported\s+(?:value|parameter)/i.test(detail) ||
+    /(?:does\s+not|doesn't|not)\s+support/i.test(detail) ||
+    /only\s+(?:the\s+)?default/i.test(detail) ||
+    /may\s+only\s+be\s+set\s+to\s+1/i.test(detail)
+  );
+}
+
+async function sendChatCompletionRequest(
+  config: ResolvedAiConfig,
+  payload: {
+    messages: AiChatMessage[];
+    temperature: number | null;
+    jsonMode?: boolean;
+    stream?: boolean;
+  },
+  signal?: AbortSignal,
+): Promise<Response> {
+  const url = `${config.baseUrl}/chat/completions`;
+  const headers = buildAiRequestHeaders(config);
+  const requestSignal = combineSignals(config.timeoutMs, signal);
+
+  const buildBody = (includeTemperature: boolean): string =>
+    JSON.stringify({
+      model: config.model,
+      messages: payload.messages,
+      ...(includeTemperature && payload.temperature !== null
+        ? { temperature: payload.temperature }
+        : {}),
+      ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
+      ...(payload.jsonMode ? { response_format: { type: 'json_object' } } : {}),
+      ...(payload.stream ? { stream: true } : {}),
+    });
+
+  const performFetch = async (includeTemperature: boolean): Promise<Response> => {
     try {
-      response = await fetch(url, {
+      return await fetch(url, {
         method: 'POST',
-        headers: buildAiRequestHeaders(config),
-        body: JSON.stringify({
-          model: config.model,
-          messages,
-          temperature,
-          ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
-          ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
-        }),
-        signal: combineSignals(config.timeoutMs, signal),
+        headers,
+        body: buildBody(includeTemperature),
+        signal: requestSignal,
       });
     } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
+      if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
         throw new AppError(504, 'AI_TIMEOUT', 'Yêu cầu tới AI quá thời gian chờ hoặc đã bị hủy.');
       }
       throw new AppError(
@@ -121,15 +146,44 @@ const defaultProvider: AiProvider = {
         'Không thể kết nối tới nhà cung cấp AI. Kiểm tra Base URL và kết nối mạng.',
       );
     }
+  };
 
-    if (!response.ok) {
-      const detail = await readProviderError(response);
-      throw new AppError(
-        502,
-        'AI_PROVIDER_ERROR',
-        `Nhà cung cấp AI trả lỗi (${response.status}): ${detail}`,
-      );
+  const hasTemperature = payload.temperature !== null;
+  let response = await performFetch(hasTemperature);
+  if (!response.ok) {
+    const detail = await readProviderError(response);
+    if (response.status === 400 && hasTemperature && isUnsupportedTemperatureError(detail)) {
+      response = await performFetch(false);
+      if (!response.ok) {
+        const retryDetail = await readProviderError(response);
+        throw new AppError(
+          502,
+          'AI_PROVIDER_ERROR',
+          `Nhà cung cấp AI trả lỗi (${response.status}): ${retryDetail}`,
+        );
+      }
+      return response;
     }
+    throw new AppError(
+      502,
+      'AI_PROVIDER_ERROR',
+      `Nhà cung cấp AI trả lỗi (${response.status}): ${detail}`,
+    );
+  }
+
+  return response;
+}
+
+const defaultProvider: AiProvider = {
+  async complete({ messages, jsonMode = false, temperature, signal, config: passedConfig }) {
+    const config = passedConfig ?? resolveEnvAiConfig();
+    assertAiConfigured(config);
+    const effectiveTemperature = temperature !== undefined ? temperature : config.temperature;
+    const response = await sendChatCompletionRequest(
+      config,
+      { messages, temperature: effectiveTemperature, jsonMode },
+      signal,
+    );
 
     const payload = (await response.json()) as {
       choices?: { message?: { content?: string | null } }[];
@@ -141,43 +195,15 @@ const defaultProvider: AiProvider = {
     return content;
   },
 
-  async *stream({ messages, temperature = 0.4, signal, config: passedConfig }) {
+  async *stream({ messages, temperature, signal, config: passedConfig }) {
     const config = passedConfig ?? resolveEnvAiConfig();
     assertAiConfigured(config);
-    const url = `${config.baseUrl}/chat/completions`;
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        method: 'POST',
-        headers: buildAiRequestHeaders(config),
-        body: JSON.stringify({
-          model: config.model,
-          messages,
-          temperature,
-          ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
-          stream: true,
-        }),
-        signal: combineSignals(config.timeoutMs, signal),
-      });
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new AppError(504, 'AI_TIMEOUT', 'Yêu cầu tới AI quá thời gian chờ hoặc đã bị hủy.');
-      }
-      throw new AppError(
-        502,
-        'AI_PROVIDER_ERROR',
-        'Không thể kết nối tới nhà cung cấp AI. Kiểm tra Base URL và kết nối mạng.',
-      );
-    }
-
-    if (!response.ok) {
-      const detail = await readProviderError(response);
-      throw new AppError(
-        502,
-        'AI_PROVIDER_ERROR',
-        `Nhà cung cấp AI trả lỗi (${response.status}): ${detail}`,
-      );
-    }
+    const effectiveTemperature = temperature !== undefined ? temperature : config.temperature;
+    const response = await sendChatCompletionRequest(
+      config,
+      { messages, temperature: effectiveTemperature, stream: true },
+      signal,
+    );
 
     if (!response.body) {
       throw new AppError(502, 'AI_INVALID_OUTPUT', 'Nhà cung cấp AI không hỗ trợ stream.');
@@ -250,7 +276,7 @@ export async function testAiConnection(
       { role: 'user', content: 'Ping' },
     ],
     jsonMode: false,
-    temperature: 0.1,
+    temperature: config.temperature,
     signal,
   });
 
@@ -364,7 +390,7 @@ export async function reviewInterviewAnswer(
       { role: 'user', content: userPrompt },
     ],
     jsonMode: true,
-    temperature: 0.25,
+    temperature: config.temperature,
   });
 
   const parsed = parseStructuredOutput(interviewReviewOutputSchema, raw);
@@ -499,7 +525,7 @@ export async function generateStudyPlan(
       { role: 'user', content: userPrompt },
     ],
     jsonMode: true,
-    temperature: 0.3,
+    temperature: config.temperature,
   });
 
   const parsed = parseStructuredOutput(studyPlanOutputSchema, raw);
@@ -612,7 +638,7 @@ export async function generateWeeklyCoaching(
     config,
     messages,
     jsonMode: false,
-    temperature: 0.4,
+    temperature: config.temperature,
     signal,
   });
   return {
@@ -632,7 +658,7 @@ export async function* streamWeeklyCoaching(
   for await (const chunk of activeProvider.stream({
     config,
     messages,
-    temperature: 0.4,
+    temperature: config.temperature,
     signal,
   })) {
     yield chunk;

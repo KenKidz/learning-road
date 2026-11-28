@@ -88,6 +88,7 @@ const aiPresets = [
   },
 ] as const;
 
+const temperaturePresets = ['0', '0.2', '0.5', '0.7', '1'];
 const reasoningEffortOptions = ['minimal', 'low', 'medium', 'high', 'max'];
 const commonHeaderKeys = [
   'x-opencode-session',
@@ -181,6 +182,7 @@ const aiForm = reactive({
   baseUrl: '',
   apiKey: '',
   model: '',
+  temperature: '' as string | number,
   reasoningEffort: '',
   customHeaders: [] as EditableHeaderRow[],
   timeoutMs: '30000',
@@ -220,6 +222,7 @@ function populateAi(data: AiSettings) {
   aiForm.baseUrl = data.baseUrl;
   aiForm.apiKey = '';
   aiForm.model = data.model;
+  aiForm.temperature = data.temperature === null ? '' : String(data.temperature);
   aiForm.reasoningEffort = data.reasoningEffort;
   aiForm.customHeaders = data.customHeaders.map((header) => ({
     id: nextHeaderRowId++,
@@ -256,9 +259,16 @@ function applyAiPreset(preset: (typeof aiPresets)[number]) {
   aiTestResult.value = null;
 }
 
+function clearAiTemperature() {
+  aiForm.temperature = '';
+  aiFormError.value = '';
+  aiTestResult.value = null;
+}
+
 function validateAiForm(): {
   baseUrl: string;
   model: string;
+  temperature: number | null;
   timeoutMs: number;
   customHeaders: AiCustomHeader[];
 } | null {
@@ -280,6 +290,17 @@ function validateAiForm(): {
   if (!model) {
     aiFormError.value = t('ai.invalidModel');
     return null;
+  }
+
+  const rawTemperature = String(aiForm.temperature ?? '').trim();
+  let temperature: number | null = null;
+  if (rawTemperature !== '') {
+    const parsedTemperature = Number(rawTemperature);
+    if (!Number.isFinite(parsedTemperature) || parsedTemperature < 0 || parsedTemperature > 2) {
+      aiFormError.value = t('ai.invalidTemperature');
+      return null;
+    }
+    temperature = parsedTemperature;
   }
 
   const timeoutMs = Number(aiForm.timeoutMs);
@@ -319,7 +340,7 @@ function validateAiForm(): {
     customHeaders.push({ key, value });
   }
 
-  return { baseUrl, model, timeoutMs, customHeaders };
+  return { baseUrl, model, temperature, timeoutMs, customHeaders };
 }
 
 async function saveAiSettings() {
@@ -331,6 +352,7 @@ async function saveAiSettings() {
     const updated = await api.updateAiSettings({
       baseUrl: validated.baseUrl,
       model: validated.model,
+      temperature: validated.temperature,
       reasoningEffort: aiForm.reasoningEffort.trim(),
       customHeaders: validated.customHeaders,
       timeoutMs: validated.timeoutMs,
@@ -369,6 +391,7 @@ async function testAi() {
     const result = await api.testAiConnection({
       baseUrl: validated.baseUrl,
       model: validated.model,
+      temperature: validated.temperature,
       reasoningEffort: aiForm.reasoningEffort.trim(),
       customHeaders: validated.customHeaders,
       timeoutMs: validated.timeoutMs,
@@ -848,7 +871,7 @@ onMounted(load);
           <span class="field-hint">{{ $t('ai.apiKeyHint') }}</span>
         </div>
 
-        <div class="field span-2">
+        <div class="field">
           <label class="field-label" for="ai-model">{{ $t('ai.modelLabel') }}</label>
           <input
             id="ai-model"
@@ -860,6 +883,45 @@ onMounted(load);
             :placeholder="$t('ai.modelPlaceholder')"
             required
           />
+        </div>
+
+        <div class="field">
+          <div class="row-between wrap" style="gap: 8px">
+            <label class="field-label" for="ai-temperature">
+              {{ $t('ai.temperatureLabel') }}
+            </label>
+            <button
+              v-if="String(aiForm.temperature ?? '').trim() !== ''"
+              type="button"
+              class="link-btn"
+              :disabled="aiSaving || aiTesting || aiResetting"
+              @click="clearAiTemperature"
+            >
+              {{ $t('ai.temperatureUseDefault') }}
+            </button>
+          </div>
+          <input
+            id="ai-temperature"
+            v-model="aiForm.temperature"
+            class="input tabular"
+            type="number"
+            min="0"
+            max="2"
+            step="any"
+            inputmode="decimal"
+            list="ai-temperature-list"
+            :placeholder="$t('ai.temperaturePlaceholder')"
+          />
+          <datalist id="ai-temperature-list">
+            <option v-for="temp in temperaturePresets" :key="temp" :value="temp" />
+          </datalist>
+          <span class="field-hint">
+            {{
+              aiSettings.envDefaults.temperature !== null
+                ? $t('ai.temperatureHintWithEnv', { value: aiSettings.envDefaults.temperature })
+                : $t('ai.temperatureHint')
+            }}
+          </span>
         </div>
 
         <div class="field">

@@ -123,6 +123,7 @@ test.describe('Learning Road E2E smoke flows', () => {
     );
     await aiSection.locator('#ai-api-key').fill('sk-e2e-test-4321');
     await aiSection.locator('#ai-model').fill('gemini-2.5-flash');
+    await aiSection.locator('#ai-temperature').fill('0.7');
     while ((await aiSection.locator('.ai-header-row').count()) > 0) {
       await aiSection.locator('.ai-header-row').first().locator('button').click();
     }
@@ -136,6 +137,7 @@ test.describe('Learning Road E2E smoke flows', () => {
     await page.reload();
     await expect(page.locator('#ai-settings').getByText('sk-e••••4321')).toBeVisible();
     await expect(page.locator('#ai-settings #ai-model')).toHaveValue('gemini-2.5-flash');
+    await expect(page.locator('#ai-settings #ai-temperature')).toHaveValue('0.7');
     await expect(page.locator('#ai-settings .ai-header-row').last().locator('input').nth(0)).toHaveValue(
       'x-opencode-session',
     );

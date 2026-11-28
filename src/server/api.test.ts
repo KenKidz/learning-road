@@ -534,12 +534,14 @@ describe('ai integration', () => {
     const previousKey = process.env.AI_API_KEY;
     const previousBaseUrl = process.env.AI_BASE_URL;
     const previousModel = process.env.AI_MODEL;
+    const previousTemperature = process.env.AI_TEMPERATURE;
     const previousReasoning = process.env.AI_REASONING_EFFORT;
     const previousSessionId = process.env.AI_SESSION_ID;
 
     delete process.env.AI_API_KEY;
     process.env.AI_BASE_URL = 'https://api.openai.com/v1';
     process.env.AI_MODEL = 'env-default-model';
+    process.env.AI_TEMPERATURE = '0.6';
     process.env.AI_REASONING_EFFORT = 'max';
     process.env.AI_SESSION_ID = 'ses_env_default';
     resetAiRateLimitForTests();
@@ -552,6 +554,8 @@ describe('ai integration', () => {
       expect(initial.hasApiKey).toBe(false);
       expect(initial.maskedApiKey).toBeNull();
       expect(initial.model).toBe('env-default-model');
+      expect(initial.temperature).toBe(0.6);
+      expect(initial.envDefaults.temperature).toBe(0.6);
       expect(initial.reasoningEffort).toBe('max');
       expect(initial.customHeaders).toEqual([
         { key: 'x-opencode-session', value: 'ses_env_default' },
@@ -560,6 +564,16 @@ describe('ai integration', () => {
       await request(app)
         .patch('/api/ai/settings')
         .send({ baseUrl: 'ftp://invalid.example.com' })
+        .expect(422);
+
+      await request(app)
+        .patch('/api/ai/settings')
+        .send({ temperature: -0.1 })
+        .expect(422);
+
+      await request(app)
+        .patch('/api/ai/settings')
+        .send({ temperature: 2.5 })
         .expect(422);
 
       await request(app)
@@ -594,6 +608,7 @@ describe('ai integration', () => {
             apiKey: 'sk-ui-secret-9999',
             baseUrl: 'https://openrouter.ai/api/v1///',
             model: 'openai/gpt-4o-mini',
+            temperature: 0.35,
             reasoningEffort: '',
             customHeaders: [
               { key: 'x-opencode-session', value: 'ses_custom_session' },
@@ -612,6 +627,7 @@ describe('ai integration', () => {
       expect(JSON.stringify(saved)).not.toContain('sk-ui-secret-9999');
       expect(saved.baseUrl).toBe('https://openrouter.ai/api/v1');
       expect(saved.model).toBe('openai/gpt-4o-mini');
+      expect(saved.temperature).toBe(0.35);
       expect(saved.reasoningEffort).toBe('');
       expect(saved.customHeaders).toEqual([
         { key: 'x-opencode-session', value: 'ses_custom_session' },
@@ -631,7 +647,7 @@ describe('ai integration', () => {
       const exported = (await request(app).get('/api/export').expect(200)).body as ExportPayload;
       expect(JSON.stringify(exported)).not.toContain('sk-ui-secret-9999');
 
-      // Updating model without sending apiKey preserves the stored UI key and custom headers
+      // Updating model without sending apiKey or temperature preserves the stored values
       const updatedModel = (
         await request(app)
           .patch('/api/ai/settings')
@@ -642,6 +658,7 @@ describe('ai integration', () => {
       expect(updatedModel.apiKeySource).toBe('ui');
       expect(updatedModel.maskedApiKey).toBe('sk-u••••9999');
       expect(updatedModel.model).toBe('google/gemini-2.5-flash');
+      expect(updatedModel.temperature).toBe(0.35);
       expect(updatedModel.reasoningEffort).toBe('');
       expect(updatedModel.customHeaders).toEqual([
         { key: 'x-opencode-session', value: 'ses_custom_session' },
@@ -652,6 +669,7 @@ describe('ai integration', () => {
         apiKey: string;
         baseUrl: string;
         model: string;
+        temperature: number | null;
         reasoningEffort: string;
         customHeaders: Array<{ key: string; value: string }>;
         timeoutMs: number;
@@ -664,6 +682,7 @@ describe('ai integration', () => {
               apiKey: config.apiKey,
               baseUrl: config.baseUrl,
               model: config.model,
+              temperature: config.temperature,
               reasoningEffort: config.reasoningEffort,
               customHeaders: config.customHeaders,
               timeoutMs: config.timeoutMs,
@@ -686,6 +705,7 @@ describe('ai integration', () => {
         apiKey: 'sk-ui-secret-9999',
         baseUrl: 'https://openrouter.ai/api/v1',
         model: 'google/gemini-2.5-flash',
+        temperature: 0.35,
         reasoningEffort: '',
         customHeaders: [
           { key: 'x-opencode-session', value: 'ses_custom_session' },
@@ -694,7 +714,7 @@ describe('ai integration', () => {
         timeoutMs: 45000,
       });
 
-      // Test unsaved draft config with custom headers without mutating stored settings
+      // Test unsaved draft config with temperature=null and custom headers without mutating stored settings
       const testDraft = (
         await request(app)
           .post('/api/ai/test')
@@ -702,6 +722,7 @@ describe('ai integration', () => {
             apiKey: 'sk-draft-key-7777',
             baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
             model: 'gemini-2.5-pro',
+            temperature: null,
             reasoningEffort: 'low',
             customHeaders: [{ key: 'HTTP-Referer', value: 'http://localhost:3000' }],
             timeoutMs: 15000,
@@ -715,10 +736,23 @@ describe('ai integration', () => {
         apiKey: 'sk-draft-key-7777',
         baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
         model: 'gemini-2.5-pro',
+        temperature: null,
         reasoningEffort: 'low',
         customHeaders: [{ key: 'HTTP-Referer', value: 'http://localhost:3000' }],
         timeoutMs: 15000,
       });
+
+      // Explicitly clearing temperature to null overrides .env AI_TEMPERATURE
+      const clearedTemp = (
+        await request(app).patch('/api/ai/settings').send({ temperature: null }).expect(200)
+      ).body as AiSettings;
+      expect(clearedTemp.temperature).toBeNull();
+
+      // Explicitly setting temperature to 0 preserves 0 (not treated as unset)
+      const zeroTemp = (
+        await request(app).patch('/api/ai/settings').send({ temperature: 0 }).expect(200)
+      ).body as AiSettings;
+      expect(zeroTemp.temperature).toBe(0);
 
       // Clearing customHeaders explicitly overrides env default to empty list
       const clearedHeaders = (
@@ -751,6 +785,7 @@ describe('ai integration', () => {
       expect(reset.apiKeySource).toBe('env');
       expect(reset.baseUrl).toBe('https://api.openai.com/v1');
       expect(reset.model).toBe('env-default-model');
+      expect(reset.temperature).toBe(0.6);
       expect(reset.reasoningEffort).toBe('max');
       expect(reset.customHeaders).toEqual([
         { key: 'x-opencode-session', value: 'ses_env_default' },
@@ -764,6 +799,8 @@ describe('ai integration', () => {
       else process.env.AI_BASE_URL = previousBaseUrl;
       if (previousModel === undefined) delete process.env.AI_MODEL;
       else process.env.AI_MODEL = previousModel;
+      if (previousTemperature === undefined) delete process.env.AI_TEMPERATURE;
+      else process.env.AI_TEMPERATURE = previousTemperature;
       if (previousReasoning === undefined) delete process.env.AI_REASONING_EFFORT;
       else process.env.AI_REASONING_EFFORT = previousReasoning;
       if (previousSessionId === undefined) delete process.env.AI_SESSION_ID;

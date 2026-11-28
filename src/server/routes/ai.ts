@@ -134,11 +134,19 @@ const customHeadersArraySchema = z
     return true;
   }, 'Tên header không được trùng lặp.');
 
+const temperatureSchema = z
+  .number()
+  .min(0, 'Temperature phải từ 0 đến 2.')
+  .max(2, 'Temperature phải từ 0 đến 2.')
+  .nullable()
+  .optional();
+
 const aiSettingsUpdateSchema = z
   .object({
     apiKey: z.string().trim().max(500).nullable().optional(),
     baseUrl: httpUrlSchema.optional(),
     model: z.string().trim().min(1, 'Model không được để trống.').max(200).optional(),
+    temperature: temperatureSchema,
     reasoningEffort: z.string().trim().max(50).optional(),
     customHeaders: customHeadersArraySchema.optional(),
     timeoutMs: z.number().int().min(1000).max(300000).optional(),
@@ -150,6 +158,7 @@ const aiTestRequestSchema = z
     apiKey: z.string().trim().max(500).optional(),
     baseUrl: httpUrlSchema.optional(),
     model: z.string().trim().min(1, 'Model không được để trống.').max(200).optional(),
+    temperature: temperatureSchema,
     reasoningEffort: z.string().trim().max(50).optional(),
     customHeaders: customHeadersArraySchema.optional(),
     timeoutMs: z.number().int().min(1000).max(300000).optional(),

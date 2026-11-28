@@ -882,6 +882,13 @@ const en: Messages = {
     hideApiKey: 'Hide API key',
     clearSavedApiKey: 'Clear saved key',
     modelPlaceholder: 'gpt-4o-mini, gemini-2.5-flash, gpt-6-luna…',
+    temperatureLabel: 'Temperature',
+    temperaturePlaceholder: 'Leave empty to use model default',
+    temperatureHint:
+      'Between 0 and 2 (creativity). Leave empty to omit this parameter (recommended for models that only support default 1).',
+    temperatureHintWithEnv:
+      'Between 0 and 2 (.env default: {value}). Leave empty to omit this parameter (recommended for models that only support the default).',
+    temperatureUseDefault: 'Use model default',
     timeoutLabel: 'Timeout (ms)',
     timeoutHint: 'Between 1,000 and 300,000 ms (.env default: {ms} ms).',
     reasoningEffortLabel: 'Reasoning Effort',
@@ -910,7 +917,7 @@ const en: Messages = {
     resetToEnv: 'Reset to .env',
     resetConfirmTitle: 'Reset AI settings to .env defaults?',
     resetConfirmText:
-      'All AI settings saved in the UI (API key, Base URL, Model, Reasoning Effort and Custom Headers) will be cleared and reverted to the server .env values.',
+      'All AI settings saved in the UI (API key, Base URL, Model, Temperature, Reasoning Effort and Custom Headers) will be cleared and reverted to the server .env values.',
     settingsSaved: 'AI settings saved and applied immediately.',
     settingsReset: 'AI settings reset to .env defaults.',
     apiKeyCleared: 'Cleared the UI-saved API key.',
@@ -919,6 +926,7 @@ const en: Messages = {
     testSuccessToast: 'AI connection succeeded ({latency} ms).',
     invalidBaseUrl: 'Base URL must be a valid http:// or https:// URL.',
     invalidModel: 'Model name is required.',
+    invalidTemperature: 'Temperature must be a number between 0 and 2 (or left empty).',
     invalidTimeout: 'Timeout must be between 1,000 and 300,000 ms.',
     updatedAtLabel: 'Last updated: {date}',
     coachTitle: 'AI Study Coach — Real Progress Analysis',
